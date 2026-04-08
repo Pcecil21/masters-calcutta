@@ -21,17 +21,30 @@ from app.models.probability import placement_probabilities
 
 
 # Default Masters Calcutta payout structure (percentage of total pool)
+# Based on 2026 Olympic Hills Calcutta rules
 DEFAULT_PAYOUT_STRUCTURE: dict[str, float] = {
-    "1st": 0.50,
-    "2nd": 0.20,
+    "1st": 0.40,
+    "2nd": 0.18,
     "3rd": 0.12,
-    "4th": 0.05,
-    "5th": 0.05,
-    "6th": 0.016,
-    "7th": 0.016,
-    "8th": 0.016,
-    "9th": 0.016,
-    "10th": 0.016,
+    "4th": 0.09,
+    "5th": 0.06,
+    "6th": 0.05,
+    "7th": 0.03,
+    "8th": 0.03,
+    "9th": 0.02,
+    "10th": 0.01,
+}
+
+
+# Default bonus structure: fixed-dollar awards outside the pool %
+DEFAULT_BONUSES: dict[str, float] = {
+    "round_leader_r1": 1000.0,
+    "round_leader_r2": 1000.0,
+    "round_leader_r3": 1000.0,
+    "low_18": 1000.0,
+    "low_27": 1000.0,
+    "low_36": 1000.0,
+    "last_place_sunday": 200.0,
 }
 
 
@@ -44,17 +57,19 @@ class EVCalculator:
     Attributes:
         payout_structure: Mapping of finish position -> pool percentage.
         payout_tiers: Ordered list of (position_label, pct) tuples.
+        bonuses: Fixed-dollar bonuses (round leaders, low rounds, last place).
     """
 
-    def __init__(self, payout_structure: Optional[dict[str, float]] = None) -> None:
+    def __init__(self, payout_structure: Optional[dict[str, float]] = None, bonuses: Optional[dict[str, float]] = None) -> None:
         """Initialize the EV calculator.
 
         Args:
             payout_structure: Custom payout structure mapping position labels
-                to pool percentages.  Defaults to the standard Calcutta
-                structure (50/20/12/5/5 + 1.6% each for 6th-10th).
+                to pool percentages.  Defaults to the 2026 Olympic Hills
+                Calcutta structure (40/18/12/9/6/5/3/3/2/1).
         """
         self.payout_structure = payout_structure or DEFAULT_PAYOUT_STRUCTURE.copy()
+        self.bonuses = bonuses or DEFAULT_BONUSES.copy()
         self.payout_tiers = sorted(
             self.payout_structure.items(),
             key=lambda x: self._position_sort_key(x[0]),
@@ -124,6 +139,58 @@ class EVCalculator:
 
         return finish_probs
 
+    def _bonus_ev(self, golfer_probs: dict, field_size: int = 55) -> dict:
+        """Estimate expected bonus value for a golfer.
+
+        Round leader / low-round bonuses correlate with skill.  We approximate
+        the probability of leading after any single round as proportional to
+        win probability, scaled so the field sums to 1.
+
+        Args:
+            golfer_probs: Probability dict with win_prob, top5_prob, etc.
+            field_size: Number of golfers in the field.
+
+        Returns:
+            Dict with bonus_ev (total $), and per-bonus breakdown.
+        """
+        win = golfer_probs.get("win_prob", golfer_probs.get("win", 0.0))
+        top10 = golfer_probs.get("top10_prob", golfer_probs.get("top10", 0.0))
+        cut_prob = golfer_probs.get("cut_prob", golfer_probs.get("make_cut", 0.7))
+
+        # Round leader probability: roughly proportional to win_prob but
+        # more spread out (good players lead rounds more often than they win).
+        # Approximate: p_lead_round ~ sqrt(win_prob) normalized.
+        # For a single golfer we use: p_lead ≈ win_prob * 3 (since leading a
+        # round is ~3x more likely than winning outright), capped at 0.30.
+        p_round_leader = min(win * 3.0, 0.30)
+
+        # Low 18/27/36: similar to round leader, slightly higher for
+        # consistent players (correlated with top10 prob)
+        p_low_round = min((win * 2.0 + top10 * 0.5) / 2.0, 0.25)
+
+        # Last place Sunday: inversely correlated with skill; mostly
+        # golfers who barely make the cut.  Approximate as small fixed prob
+        # scaled inversely with cut_prob.
+        p_last_sunday = max(0.005, (1.0 - cut_prob) * 0.02) if cut_prob < 0.95 else 0.005
+
+        breakdown = {}
+        total_bonus_ev = 0.0
+
+        for key, amount in self.bonuses.items():
+            if "round_leader" in key:
+                p = p_round_leader
+            elif "low_" in key:
+                p = p_low_round
+            elif "last_place" in key:
+                p = p_last_sunday
+            else:
+                p = 0.0
+            ev = p * amount
+            breakdown[key] = {"prob": round(p, 6), "amount": amount, "ev": round(ev, 2)}
+            total_bonus_ev += ev
+
+        return {"bonus_ev": round(total_bonus_ev, 2), "breakdown": breakdown}
+
     def calculate_ev(
         self,
         golfer_probs: dict,
@@ -161,6 +228,11 @@ class EVCalculator:
                 "expected_dollars": round(expected, 2),
             }
 
+        # Add bonus EV (round leaders, low rounds, last place Sunday)
+        bonus_result = self._bonus_ev(golfer_probs)
+        bonus_ev = bonus_result["bonus_ev"]
+        total_expected_payout += bonus_ev
+
         ev = total_expected_payout - price
         ev_multiple = total_expected_payout / price if price > 0 else float("inf")
         roi = (ev / price * 100) if price > 0 else float("inf")
@@ -170,6 +242,8 @@ class EVCalculator:
             "ev": round(ev, 2),
             "ev_multiple": round(ev_multiple, 3),
             "roi": round(roi, 2),
+            "bonus_ev": bonus_ev,
+            "bonus_breakdown": bonus_result["breakdown"],
             "payout_breakdown": payout_breakdown,
         }
 

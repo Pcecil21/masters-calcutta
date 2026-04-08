@@ -25,7 +25,7 @@ export default function CompetitorPanel() {
   const fetchCompetitors = async () => {
     try {
       const data = await getCompetitors();
-      setCompetitors(data || []);
+      setCompetitors(data?.competitors || data || []);
     } catch (err) {
       setError('Could not load competitor data');
     } finally {

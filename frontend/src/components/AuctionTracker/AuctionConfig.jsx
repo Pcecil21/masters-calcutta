@@ -3,8 +3,23 @@ import { X, Settings } from 'lucide-react';
 import { useAuction } from '../../hooks/useAuction';
 
 const PAYOUT_PRESETS = {
+  olympic_hills_2026: {
+    label: 'Olympic Hills 2026 (40/18/12/9/6/5/3/3/2/1)',
+    payouts: {
+      '1st': 0.40,
+      '2nd': 0.18,
+      '3rd': 0.12,
+      '4th': 0.09,
+      '5th': 0.06,
+      '6th': 0.05,
+      '7th': 0.03,
+      '8th': 0.03,
+      '9th': 0.02,
+      '10th': 0.01,
+    },
+  },
   standard: {
-    label: 'Standard (Top 10)',
+    label: 'Standard (50/20/12/5/5 + 1.6% each 6-10)',
     payouts: {
       '1st': 0.50,
       '2nd': 0.20,
@@ -22,22 +37,31 @@ const PAYOUT_PRESETS = {
     label: 'Deep (50/25/15/10)',
     payouts: { '1st': 0.50, '2nd': 0.25, '3rd': 0.15, '4th': 0.10 },
   },
-  flat: {
-    label: 'Flat Top 5',
-    payouts: { '1st': 0.40, '2nd': 0.25, '3rd': 0.15, '4th': 0.12, '5th': 0.08 },
-  },
   winner_take_all: {
     label: 'Winner Take All',
     payouts: { '1st': 1.00 },
   },
 };
 
+const DEFAULT_BONUSES = {
+  round_leader_r1: 1000,
+  round_leader_r2: 1000,
+  round_leader_r3: 1000,
+  low_18: 1000,
+  low_27: 1000,
+  low_36: 1000,
+  last_place_sunday: 200,
+};
+
 export default function AuctionConfig({ open, onClose }) {
   const { auction, configure, reset } = useAuction();
-  const [poolSize, setPoolSize] = useState(auction?.total_pool || 5000);
-  const [bankroll, setBankroll] = useState(auction?.my_bankroll || 500);
+  const [poolSize, setPoolSize] = useState(auction?.total_pool || 50000);
+  const [bankroll, setBankroll] = useState(auction?.my_bankroll || 12000);
   const [numBidders, setNumBidders] = useState(auction?.num_bidders || 10);
-  const [preset, setPreset] = useState('standard');
+  const [preset, setPreset] = useState('olympic_hills_2026');
+  const [bonuses, setBonuses] = useState(
+    auction?.bonuses || { ...DEFAULT_BONUSES }
+  );
   const [saving, setSaving] = useState(false);
 
   if (!open) return null;
@@ -50,6 +74,7 @@ export default function AuctionConfig({ open, onClose }) {
         my_bankroll: bankroll,
         num_bidders: numBidders,
         payout_structure: PAYOUT_PRESETS[preset].payouts,
+        bonuses,
       });
       onClose();
     } catch (err) {
@@ -151,6 +176,44 @@ export default function AuctionConfig({ open, onClose }) {
                 </label>
               ))}
             </div>
+          </div>
+
+          {/* Bonuses */}
+          <div>
+            <label className="block text-[10px] uppercase tracking-wider text-gray-500 mb-2">
+              Fixed Bonuses ($)
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                ['round_leader_r1', 'R1 Leader'],
+                ['round_leader_r2', 'R2 Leader'],
+                ['round_leader_r3', 'R3 Leader'],
+                ['low_18', 'Low 18'],
+                ['low_27', 'Low 27'],
+                ['low_36', 'Low 36'],
+                ['last_place_sunday', 'Last Place Sun'],
+              ].map(([key, label]) => (
+                <div key={key} className="flex items-center gap-2">
+                  <span className="text-[10px] text-gray-400 w-20 shrink-0">
+                    {label}
+                  </span>
+                  <input
+                    type="number"
+                    value={bonuses[key] || 0}
+                    onChange={(e) =>
+                      setBonuses((prev) => ({
+                        ...prev,
+                        [key]: Number(e.target.value),
+                      }))
+                    }
+                    className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-white focus:border-augusta focus:outline-none"
+                  />
+                </div>
+              ))}
+            </div>
+            <p className="text-[9px] text-gray-600 mt-1">
+              Total: ${Object.values(bonuses).reduce((a, b) => a + b, 0).toLocaleString()}
+            </p>
           </div>
         </div>
 

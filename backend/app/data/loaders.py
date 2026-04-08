@@ -44,16 +44,25 @@ _STORE: dict[str, Any] = {
         "my_bankroll": 0.0,
         "num_bidders": 12,
         "payout_structure": {
-            "1st": 0.50,
-            "2nd": 0.20,
+            "1st": 0.40,
+            "2nd": 0.18,
             "3rd": 0.12,
-            "4th": 0.05,
-            "5th": 0.05,
-            "6th": 0.016,
-            "7th": 0.016,
-            "8th": 0.016,
-            "9th": 0.016,
-            "10th": 0.016,
+            "4th": 0.09,
+            "5th": 0.06,
+            "6th": 0.05,
+            "7th": 0.03,
+            "8th": 0.03,
+            "9th": 0.02,
+            "10th": 0.01,
+        },
+        "bonuses": {
+            "round_leader_r1": 1000.0,
+            "round_leader_r2": 1000.0,
+            "round_leader_r3": 1000.0,
+            "low_18": 1000.0,
+            "low_27": 1000.0,
+            "low_36": 1000.0,
+            "last_place_sunday": 200.0,
         },
     },
     "ev_calculator": None,   # EVCalculator (initialized on startup)
@@ -113,7 +122,10 @@ def load_seed_data() -> None:
         golfers_remaining=list(golfers.keys()),
         golfers_sold=[],
     )
-    _STORE["ev_calculator"] = EVCalculator(_STORE["config"]["payout_structure"])
+    _STORE["ev_calculator"] = EVCalculator(
+        _STORE["config"]["payout_structure"],
+        _STORE["config"].get("bonuses"),
+    )
     _STORE["alert_cache"] = None
 
 
@@ -188,13 +200,16 @@ def load_auction_state() -> bool:
 
         # Restore config (merge with defaults so ev_calculator key stays)
         saved_config = payload.get("config", {})
-        for key in ("total_pool", "my_bankroll", "num_bidders", "payout_structure"):
+        for key in ("total_pool", "my_bankroll", "num_bidders", "payout_structure", "bonuses"):
             if key in saved_config:
                 _STORE["config"][key] = saved_config[key]
 
         # Rebuild EVCalculator with restored payout structure
         from app.strategy.ev_calculator import EVCalculator
-        _STORE["ev_calculator"] = EVCalculator(_STORE["config"]["payout_structure"])
+        _STORE["ev_calculator"] = EVCalculator(
+        _STORE["config"]["payout_structure"],
+        _STORE["config"].get("bonuses"),
+    )
 
         # Restore auction state
         state_data = payload.get("auction_state")

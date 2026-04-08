@@ -31,22 +31,26 @@ def _compute_max_bid(
 ) -> float:
     """Compute the maximum recommended bid for a golfer.
 
+    In a Calcutta, unspent bankroll is wasted — you MUST deploy capital.
+    The primary signal is breakeven EV (the price where EV = 0).  Kelly
+    acts as a secondary guardrail to avoid over-concentrating.
+
     Factors:
-    - Dollar EV from payout structure (via EVCalculator)
-    - Kelly-criterion bankroll sizing
-    - Auction phase (bid more aggressively early for top golfers)
+    - Breakeven price from EV model (what the golfer is actually worth)
+    - Kelly-criterion bankroll sizing (prevents ruin on any single golfer)
+    - Auction phase (bid aggressively early for elite, conserve late)
     - Portfolio diversification needs
+    - Budget pacing (don't blow bankroll too early)
     """
     ev_calc = get_store().get("ev_calculator") or EVCalculator()
-    result = ev_calc.calculate_ev(
-        {
-            "win_prob": golfer.model_win_prob,
-            "top5_prob": golfer.model_top5_prob,
-            "top10_prob": golfer.model_top10_prob,
-        },
-        1.0,  # dummy price -- we only need expected_payout
-        config.get("total_pool", 0.0),
-    )
+    golfer_probs = {
+        "win_prob": golfer.model_win_prob,
+        "top5_prob": golfer.model_top5_prob,
+        "top10_prob": golfer.model_top10_prob,
+    }
+    total_pool = config.get("total_pool", 0.0)
+
+    result = ev_calc.calculate_ev(golfer_probs, 1.0, total_pool)
     ev = result["expected_payout"]
     remaining = state.remaining_bankroll
     unsold_count = len(state.golfers_remaining)
@@ -54,38 +58,27 @@ def _compute_max_bid(
     if remaining <= 0 or ev <= 0:
         return 0.0
 
-    # Kelly-based limit
-    kelly_max = KellyCalculator.max_bid(
-        win_prob=golfer.model_top10_prob,
-        expected_payout=ev,
-        bankroll=remaining,
-    )
+    # PRIMARY: breakeven price (where EV = 0) with a margin of safety.
+    # Recommend bidding up to 85% of breakeven — leaves 15% expected edge.
+    breakeven = ev_calc.breakeven_price(golfer_probs, total_pool)
+    base_max = breakeven * 0.85
 
-    # Base max bid: use Kelly as the foundation
-    base_max = kelly_max
-
-    # Phase adjustment: in early rounds, allow slightly higher bids for elite golfers
+    # Phase adjustment
     phase = state.current_phase
-    if phase == "early" and golfer.model_win_prob > 0.08:
-        base_max *= 1.15  # willing to pay slight premium for elite early
+    if phase in ("pre_auction", "early") and golfer.model_win_prob > 0.08:
+        base_max *= 1.15  # pay premium for elite early — they're worth fighting for
     elif phase == "late":
-        base_max *= 0.90  # more conservative late
-
-    # Bankroll constraint: never bid more than 40% of remaining bankroll
-    # unless this is genuinely elite (top 3 model probability)
-    bankroll_cap = remaining * 0.40
-    if golfer.model_win_prob > 0.12:
-        bankroll_cap = remaining * 0.55  # allow bigger allocation for elite
+        base_max *= 0.90  # slightly more conservative late
 
     # Diversification: if we already have 5+ golfers, reduce max bids
     if portfolio_count >= 5:
         base_max *= 0.85
 
-    # Reserve floor: always keep enough to buy at least a few more golfers
-    min_reserve = max(0, (unsold_count - 1) * 2.0)  # $2 minimum per remaining
+    # Reserve floor: keep minimum to stay in the game
+    min_reserve = max(0, (unsold_count - 1) * 2.0)
     available_for_bid = max(0, remaining - min_reserve)
 
-    return round(min(base_max, bankroll_cap, available_for_bid), 2)
+    return round(min(base_max, available_for_bid), 2)
 
 
 def _classify_alert_level(ev: float, max_bid: float, golfer: Golfer) -> str:

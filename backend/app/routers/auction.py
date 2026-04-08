@@ -91,15 +91,31 @@ async def configure_auction(cfg: AuctionConfig) -> AuctionState:
     store["config"]["my_bankroll"] = cfg.my_bankroll
     store["config"]["num_bidders"] = cfg.num_bidders
     store["config"]["payout_structure"] = cfg.payout_structure
+    store["config"]["bonuses"] = cfg.bonuses
 
     # Rebuild EVCalculator with the new payout structure
-    store["ev_calculator"] = EVCalculator(cfg.payout_structure)
+    store["ev_calculator"] = EVCalculator(cfg.payout_structure, cfg.bonuses)
     store["alert_cache"] = None
 
     state: AuctionState = store["auction_state"]
     state.total_pool = cfg.total_pool
     state.my_bankroll = cfg.my_bankroll
     state.remaining_bankroll = cfg.my_bankroll
+    state.bonuses = cfg.bonuses
+
+    # Recalculate ev_score for all golfers using actual pool size
+    ev_calc = store["ev_calculator"]
+    for golfer in store["golfers"].values():
+        result = ev_calc.calculate_ev(
+            {
+                "win_prob": golfer.model_win_prob,
+                "top5_prob": golfer.model_top5_prob,
+                "top10_prob": golfer.model_top10_prob,
+            },
+            0.0,
+            cfg.total_pool,
+        )
+        golfer.ev_score = round(result["expected_payout"], 2)
 
     save_auction_state()
     return state

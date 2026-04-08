@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import clsx from 'clsx';
 import { DollarSign, User, Search } from 'lucide-react';
 import { useAuction } from '../../hooks/useAuction';
+import { priceCheck } from '../../api/client';
 import { formatCurrency, formatPct } from '../../utils/format';
 
 export default function BidForm({ preselectedGolfer, onClearPreselect }) {
@@ -35,10 +36,21 @@ export default function BidForm({ preselectedGolfer, onClearPreselect }) {
   }, [remaining, search]);
 
   const selectedGolfer = golfers.find((g) => g.id === selectedGolferId);
+  const [liveEV, setLiveEV] = useState(null);
+
+  // Fetch real dollar EV from backend when golfer is selected
+  useEffect(() => {
+    if (!selectedGolferId) { setLiveEV(null); return; }
+    let cancelled = false;
+    priceCheck(selectedGolferId, 1).then((data) => {
+      if (!cancelled) setLiveEV(data);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [selectedGolferId]);
 
   const priceNum = parseFloat(price) || 0;
-  // Use ev_score as the model's dollar EV estimate
-  const modelValue = selectedGolfer?.ev_score ?? null;
+  const modelValue = liveEV?.expected_payout ?? null;
+  const maxBid = liveEV?.max_bid ?? null;
   const isUnderValue = modelValue != null && priceNum > 0 && priceNum < modelValue;
   const isOverValue = modelValue != null && priceNum > 0 && priceNum >= modelValue;
 
@@ -124,19 +136,19 @@ export default function BidForm({ preselectedGolfer, onClearPreselect }) {
       {/* Model Value Indicator */}
       {selectedGolfer && (
         <div className="flex items-center gap-3 text-xs bg-gray-800/60 rounded px-3 py-2 border border-gray-700/50">
-          <span className="text-gray-500">Model Value:</span>
+          <span className="text-gray-500">Worth:</span>
           <span className="font-bold text-gold">
             {modelValue != null ? formatCurrency(modelValue) : '--'}
           </span>
           <span className="text-gray-600">|</span>
-          <span className="text-gray-500">Win%:</span>
+          <span className="text-gray-500">Max Bid:</span>
           <span className="text-green-400 font-mono">
-            {formatPct(selectedGolfer.model_win_prob)}
+            {maxBid != null ? formatCurrency(maxBid) : '--'}
           </span>
           <span className="text-gray-600">|</span>
-          <span className="text-gray-500">EV:</span>
+          <span className="text-gray-500">Win%:</span>
           <span className="text-green-300 font-mono">
-            {selectedGolfer.ev_score?.toFixed(2) || '--'}
+            {formatPct(selectedGolfer.model_win_prob)}
           </span>
         </div>
       )}

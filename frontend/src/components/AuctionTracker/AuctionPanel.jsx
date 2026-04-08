@@ -32,6 +32,9 @@ export default function AuctionPanel() {
   const bankroll = auction?.my_bankroll || 0;
   const remaining = auction?.remaining_bankroll || 0;
   const spent = bankroll - remaining;
+  const bonusTotal = auction?.bonuses
+    ? Object.values(auction.bonuses).reduce((a, b) => a + b, 0)
+    : 0;
 
   const soldIds = useMemo(
     () => new Set(auction?.golfers_sold || []),
@@ -68,10 +71,11 @@ export default function AuctionPanel() {
   return (
     <div className="space-y-4">
       {/* Top Stats Bar */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <StatCard
           label="Total Pool"
           value={formatCurrency(poolSize)}
+          subtitle={bonusTotal > 0 ? `+${formatCurrency(bonusTotal)} bonuses` : undefined}
           className="border-l-2 border-l-gold"
         />
         <StatCard
@@ -98,6 +102,11 @@ export default function AuctionPanel() {
           trend={
             !isNaN(spendRateNum) ? (spendRateNum > 1.2 ? 'down' : spendRateNum < 0.8 ? 'up' : 'neutral') : 'neutral'
           }
+        />
+        <StatCard
+          label="Phase"
+          value={auction?.current_phase?.replace('_', ' ') || 'Pre-Auction'}
+          subtitle={`${totalGolfers - golfersRemaining} of ${totalGolfers} sold`}
         />
       </div>
 

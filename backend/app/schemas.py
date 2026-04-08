@@ -57,18 +57,30 @@ class AuctionConfig(BaseModel):
     my_bankroll: float = Field(gt=0, description="My available bankroll")
     num_bidders: int = Field(default=12, ge=1)
     estimated_pool: float = Field(default=0.0, ge=0, description="Optional initial pool estimate before bids flow")
+    bonuses: dict = Field(
+        default_factory=lambda: {
+            "round_leader_r1": 1000.0,
+            "round_leader_r2": 1000.0,
+            "round_leader_r3": 1000.0,
+            "low_18": 1000.0,
+            "low_27": 1000.0,
+            "low_36": 1000.0,
+            "last_place_sunday": 200.0,
+        },
+        description="Fixed-dollar bonuses outside the pool percentage payouts",
+    )
     payout_structure: dict = Field(
         default_factory=lambda: {
-            "1st": 0.50,
-            "2nd": 0.20,
+            "1st": 0.40,
+            "2nd": 0.18,
             "3rd": 0.12,
-            "4th": 0.05,
-            "5th": 0.05,
-            "6th": 0.016,
-            "7th": 0.016,
-            "8th": 0.016,
-            "9th": 0.016,
-            "10th": 0.016,
+            "4th": 0.09,
+            "5th": 0.06,
+            "6th": 0.05,
+            "7th": 0.03,
+            "8th": 0.03,
+            "9th": 0.02,
+            "10th": 0.01,
         },
         description="Payout percentages keyed by finish position/tier",
     )
@@ -87,6 +99,18 @@ class AuctionState(BaseModel):
     current_phase: str = Field(
         default="pre_auction",
         description="pre_auction | early (top 20) | middle (21-50) | late (51+) | complete",
+    )
+    bonuses: dict = Field(
+        default_factory=lambda: {
+            "round_leader_r1": 1000.0,
+            "round_leader_r2": 1000.0,
+            "round_leader_r3": 1000.0,
+            "low_18": 1000.0,
+            "low_27": 1000.0,
+            "low_36": 1000.0,
+            "last_place_sunday": 200.0,
+        },
+        description="Fixed-dollar bonuses for round leaders, low rounds, last place",
     )
 
 
