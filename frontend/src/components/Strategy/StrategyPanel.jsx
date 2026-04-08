@@ -7,11 +7,13 @@ import {
   Lightbulb,
   BarChart3,
   ClipboardList,
+  FileText,
 } from 'lucide-react';
 import { getRecommendations, getAntiConsensus, getQuickSheet, refreshOdds } from '../../api/client';
 import { formatCurrency, formatPct, formatMultiplier } from '../../utils/format';
 import AlertBadge from '../common/AlertBadge';
 import AntiConsensusChart from './AntiConsensusChart';
+import IntelBrief from './IntelBrief';
 
 export default function StrategyPanel() {
   const [recs, setRecs] = useState(null);
@@ -20,6 +22,7 @@ export default function StrategyPanel() {
   const [loading, setLoading] = useState(true);
   const [oddsRefreshing, setOddsRefreshing] = useState(false);
   const [oddsMessage, setOddsMessage] = useState(null);
+  const [showIntelBrief, setShowIntelBrief] = useState(false);
 
   const handleRefreshOdds = async () => {
     let apiKey = localStorage.getItem('odds_api_key');
@@ -95,6 +98,13 @@ export default function StrategyPanel() {
         >
           <RefreshCw className={`w-3.5 h-3.5 ${oddsRefreshing ? 'animate-spin' : ''}`} />
           {oddsRefreshing ? 'Refreshing...' : 'Refresh Live Odds'}
+        </button>
+        <button
+          onClick={() => setShowIntelBrief(true)}
+          className="flex items-center gap-2 px-3 py-1.5 bg-gold/20 hover:bg-gold/30 border border-gold/40 rounded-lg text-xs text-gold font-medium transition-colors"
+        >
+          <FileText className="w-3.5 h-3.5" />
+          View Intel Brief
         </button>
         {oddsMessage && (
           <span
@@ -322,6 +332,11 @@ export default function StrategyPanel() {
           </>
         )}
       </div>
+
+      {/* Intel Brief Modal */}
+      {showIntelBrief && (
+        <IntelBrief onClose={() => setShowIntelBrief(false)} />
+      )}
     </div>
   );
 }

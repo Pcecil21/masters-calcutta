@@ -46,6 +46,14 @@ export const getBacktestYears = () =>
 export const runBacktest = (params) =>
   api.post('/backtest/run', params).then((r) => r.data);
 
+// --- Scorecard ---
+export const calculateScorecard = (results) =>
+  api.post('/scorecard/calculate', { results }).then((r) => r.data);
+export const getCompetitors = () =>
+  api.get('/auction/competitors').then((r) => r.data);
+export const getFieldValue = () =>
+  api.get('/auction/field-value').then((r) => r.data);
+
 // --- Odds ---
 export const refreshOdds = (apiKey) =>
   api.post('/odds/refresh', { api_key: apiKey || undefined }).then((r) => r.data);

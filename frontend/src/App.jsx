@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import clsx from 'clsx';
 import {
   Gavel,
@@ -6,6 +6,7 @@ import {
   Brain,
   Briefcase,
   History,
+  ClipboardCheck,
   RefreshCw,
 } from 'lucide-react';
 
@@ -14,6 +15,9 @@ import GolferBoard from './components/GolferBoard/GolferBoard';
 import StrategyPanel from './components/Strategy/StrategyPanel';
 import PortfolioPanel from './components/Portfolio/PortfolioPanel';
 import BacktestPanel from './components/BacktestPanel';
+import ScorecardPanel from './components/Scorecard/ScorecardPanel';
+import LiveMode from './components/LiveMode/LiveMode';
+import LiveModeToggle from './components/LiveMode/LiveModeToggle';
 
 const TABS = [
   { id: 'auction', label: 'Auction', icon: Gavel },
@@ -21,10 +25,32 @@ const TABS = [
   { id: 'strategy', label: 'Strategy', icon: Brain },
   { id: 'portfolio', label: 'Portfolio', icon: Briefcase },
   { id: 'backtest', label: 'Backtest', icon: History },
+  { id: 'scorecard', label: 'Scorecard', icon: ClipboardCheck },
 ];
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('auction');
+  const [liveMode, setLiveMode] = useState(false);
+
+  const toggleLiveMode = useCallback(() => {
+    setLiveMode((prev) => !prev);
+  }, []);
+
+  // Global 'L' key to toggle live mode (only when not typing in an input)
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key === 'l' || e.key === 'L') {
+        const tag = e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) {
+          return;
+        }
+        e.preventDefault();
+        toggleLiveMode();
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [toggleLiveMode]);
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
@@ -91,6 +117,7 @@ export default function App() {
         {activeTab === 'strategy' && <StrategyPanel />}
         {activeTab === 'portfolio' && <PortfolioPanel />}
         {activeTab === 'backtest' && <BacktestPanel />}
+        {activeTab === 'scorecard' && <ScorecardPanel />}
       </main>
 
       {/* Footer */}
@@ -100,6 +127,10 @@ export default function App() {
           strategy
         </div>
       </footer>
+
+      {/* Live Mode Toggle + Overlay */}
+      <LiveModeToggle onClick={toggleLiveMode} />
+      <LiveMode open={liveMode} onClose={() => setLiveMode(false)} />
     </div>
   );
 }

@@ -184,6 +184,44 @@ class Alert(BaseModel):
     recommended_max: Optional[float] = None
 
 
+class TournamentResult(BaseModel):
+    """Actual tournament result for one golfer."""
+
+    golfer_name: str
+    finish_position: int = Field(
+        description="1 = winner, 2 = runner-up, etc. 99 = missed cut"
+    )
+
+
+class ScorecardRequest(BaseModel):
+    """Post-tournament scorecard calculation request."""
+
+    results: list[TournamentResult]
+
+
+class ScorecardResponse(BaseModel):
+    """Full post-tournament scorecard analysis."""
+
+    my_golfers: list[dict] = Field(
+        default_factory=list,
+        description="golfer_name, purchase_price, finish_position, payout, profit",
+    )
+    total_invested: float = 0.0
+    total_payout: float = 0.0
+    net_profit: float = 0.0
+    roi_pct: float = 0.0
+    best_pick: dict = Field(default_factory=dict)
+    worst_pick: dict = Field(default_factory=dict)
+    model_accuracy: dict = Field(
+        default_factory=dict,
+        description="Brier score and model vs actual summary",
+    )
+    optimal_hindsight: dict = Field(
+        default_factory=dict,
+        description="Best possible portfolio given perfect information",
+    )
+
+
 class BacktestRequest(BaseModel):
     """Request to run a historical backtest."""
 

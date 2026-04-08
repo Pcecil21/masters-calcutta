@@ -13,8 +13,13 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.data.loaders import get_store, load_seed_data
-from app.routers import auction, backtest, golfers, odds, portfolio, strategy
+from app.data.loaders import (
+    get_state_file_info,
+    get_store,
+    load_auction_state,
+    load_seed_data,
+)
+from app.routers import auction, backtest, golfers, odds, portfolio, scorecard, strategy
 
 
 @asynccontextmanager
@@ -58,12 +63,34 @@ app.include_router(strategy.router, prefix="/api")
 app.include_router(portfolio.router, prefix="/api")
 app.include_router(backtest.router, prefix="/api")
 app.include_router(odds.router, prefix="/api")
+app.include_router(scorecard.router, prefix="/api")
 
 
 @app.get("/api/health")
 async def health_check() -> dict:
     """Basic health check endpoint."""
     return {"status": "ok", "service": "masters-calcutta-api"}
+
+
+@app.get("/api/auction/has-saved-state")
+async def has_saved_state() -> dict:
+    """Check whether a saved auction state file exists on disk."""
+    return get_state_file_info()
+
+
+@app.post("/api/auction/restore")
+async def restore_auction_state() -> dict:
+    """Restore auction state from disk after a server restart or crash."""
+    restored = load_auction_state()
+    if not restored:
+        return {"restored": False, "message": "No saved state found to restore."}
+    store = get_store()
+    return {
+        "restored": True,
+        "auction_state": store["auction_state"].model_dump(),
+        "bid_count": len(store["bid_history"]),
+        "portfolio_count": len(store["portfolio"].entries) if store["portfolio"] else 0,
+    }
 
 
 @app.post("/api/recalculate")

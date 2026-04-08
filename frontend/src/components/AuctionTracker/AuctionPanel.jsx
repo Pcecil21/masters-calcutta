@@ -16,6 +16,8 @@ import BidForm from './BidForm';
 import QuickPrice from './QuickPrice';
 import AlertTicker from './AlertTicker';
 import BidHistory from './BidHistory';
+import CompetitorPanel from './CompetitorPanel';
+import FieldValue from './FieldValue';
 import AuctionConfig from './AuctionConfig';
 
 export default function AuctionPanel() {
@@ -132,10 +134,16 @@ export default function AuctionPanel() {
           <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
             <BidHistory />
           </div>
+
+          <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+            <CompetitorPanel />
+          </div>
         </div>
 
-        {/* Right: Remaining Golfers Mini-Board */}
-        <div className="lg:col-span-2 bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+        {/* Right: Field Value + Remaining Golfers Mini-Board */}
+        <div className="lg:col-span-2 space-y-4">
+          <FieldValue />
+          <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
               <Users className="w-4 h-4 text-augusta" />
@@ -197,6 +205,7 @@ export default function AuctionPanel() {
               </div>
             )}
           </div>
+        </div>
         </div>
       </div>
 

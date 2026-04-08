@@ -12,6 +12,7 @@ import {
   TrendingUp,
   Shield,
   Target,
+  Share2,
 } from 'lucide-react';
 import {
   getPortfolio,
@@ -27,6 +28,7 @@ import {
 } from '../../utils/format';
 import StatCard from '../common/StatCard';
 import PayoutScenarios from './PayoutScenarios';
+import ShareCard from './ShareCard';
 
 const PIE_COLORS = [
   '#006747',
@@ -45,6 +47,7 @@ export default function PortfolioPanel() {
   const [optimization, setOptimization] = useState(null);
   const [payout, setPayout] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showShareCard, setShowShareCard] = useState(false);
 
   const fetchData = async () => {
     setLoading(true);
@@ -95,6 +98,17 @@ export default function PortfolioPanel() {
 
   return (
     <div className="space-y-6">
+      {/* Actions */}
+      <div className="flex items-center justify-end">
+        <button
+          onClick={() => setShowShareCard(true)}
+          className="flex items-center gap-2 px-3 py-1.5 bg-augusta/20 hover:bg-augusta/30 border border-augusta/40 rounded-lg text-xs text-augusta font-medium transition-colors"
+        >
+          <Share2 className="w-3.5 h-3.5" />
+          Share Portfolio
+        </button>
+      </div>
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard
@@ -260,6 +274,11 @@ export default function PortfolioPanel() {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Share Card Modal */}
+      {showShareCard && (
+        <ShareCard portfolio={portfolio} onClose={() => setShowShareCard(false)} />
       )}
     </div>
   );

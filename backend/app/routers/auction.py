@@ -12,7 +12,12 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
 
-from app.data.loaders import get_store, reset_auction as _reset_auction
+from app.data.loaders import (
+    clear_saved_state,
+    get_store,
+    reset_auction as _reset_auction,
+    save_auction_state,
+)
 from app.schemas import (
     Alert,
     AuctionConfig,
@@ -95,6 +100,8 @@ async def configure_auction(cfg: AuctionConfig) -> AuctionState:
     state.total_pool = cfg.total_pool
     state.my_bankroll = cfg.my_bankroll
     state.remaining_bankroll = cfg.my_bankroll
+
+    save_auction_state()
     return state
 
 
@@ -202,6 +209,8 @@ async def record_bid(bid: BidRequest) -> BidRecord:
         # Invalidate alert cache
         store["alert_cache"] = None
 
+        save_auction_state()
+
     return record
 
 
@@ -241,6 +250,8 @@ async def undo_last_bid() -> AuctionState:
 
         # Invalidate alert cache
         store["alert_cache"] = None
+
+        save_auction_state()
 
     return state
 
@@ -340,4 +351,203 @@ async def reset() -> AuctionState:
     """Reset the entire auction.  Clears all bids and portfolio."""
     async with _auction_lock:
         _reset_auction()
+        clear_saved_state()
     return get_store()["auction_state"]
+
+
+# ---------------------------------------------------------------------------
+# Feature 3: Competitor Scouting
+# ---------------------------------------------------------------------------
+
+
+@router.get("/competitors")
+async def get_competitors():
+    """Analyze bid history by buyer to scout competitor strategies."""
+    store = get_store()
+    bid_history: list[BidRecord] = store["bid_history"]
+    golfers = store["golfers"]
+
+    # Group bids by buyer (excluding "me")
+    buyer_bids: dict[str, list[BidRecord]] = {}
+    for bid in bid_history:
+        if bid.buyer.lower() == "me":
+            continue
+        buyer_bids.setdefault(bid.buyer, []).append(bid)
+
+    if not buyer_bids:
+        return {"competitors": [], "summary": "No competitor bids recorded yet."}
+
+    # Compute total spent across all competitors for quartile calculation
+    all_totals = [sum(b.price for b in bids) for bids in buyer_bids.values()]
+    all_totals_sorted = sorted(all_totals)
+    q75_idx = int(len(all_totals_sorted) * 0.75)
+    top_quartile_threshold = all_totals_sorted[q75_idx] if all_totals_sorted else 0
+
+    competitors = []
+    for buyer, bids in buyer_bids.items():
+        total_spent = sum(b.price for b in bids)
+        num_golfers = len(bids)
+        avg_price = total_spent / num_golfers if num_golfers > 0 else 0
+
+        golfer_details = []
+        avg_win_prob = 0.0
+        avg_anti_consensus = 0.0
+        for bid in bids:
+            golfer = golfers.get(bid.golfer_id)
+            name = golfer.name if golfer else bid.golfer_id
+            golfer_details.append({"name": name, "price": bid.price})
+            if golfer:
+                avg_win_prob += golfer.model_win_prob
+                avg_anti_consensus += golfer.anti_consensus_score
+        if num_golfers > 0:
+            avg_win_prob /= num_golfers
+            avg_anti_consensus /= num_golfers
+
+        # Classify strategy profile
+        profiles = []
+        if avg_win_prob > 0.05:
+            profiles.append("Favorite Hunter")
+        if avg_anti_consensus > 0.005:
+            profiles.append("Value Seeker")
+        if num_golfers >= 5 and avg_price < 50:
+            profiles.append("Spray and Pray")
+        if total_spent >= top_quartile_threshold and top_quartile_threshold > 0:
+            profiles.append("Big Spender")
+        if not profiles:
+            profiles.append("Balanced")
+
+        profile = " / ".join(profiles)
+
+        # Generate implication
+        if "Favorite Hunter" in profiles:
+            implication = (
+                f"{buyer} loaded up on favorites -- remaining value shifts to "
+                f"mid-tier and longshots."
+            )
+        elif "Big Spender" in profiles:
+            implication = (
+                f"{buyer} is spending aggressively (${total_spent:.0f}) -- "
+                f"expect them to slow down or get squeezed late."
+            )
+        elif "Spray and Pray" in profiles:
+            implication = (
+                f"{buyer} is accumulating cheap options -- they have "
+                f"broad coverage but thin on any single winner."
+            )
+        elif "Value Seeker" in profiles:
+            implication = (
+                f"{buyer} is targeting model-undervalued golfers -- "
+                f"compete for anti-consensus picks early."
+            )
+        else:
+            implication = (
+                f"{buyer} is playing a balanced strategy with "
+                f"{num_golfers} golfers at ${avg_price:.0f} average."
+            )
+
+        competitors.append({
+            "buyer": buyer,
+            "total_spent": round(total_spent, 2),
+            "num_golfers": num_golfers,
+            "avg_price": round(avg_price, 2),
+            "golfers": golfer_details,
+            "profile": profile,
+            "implication": implication,
+        })
+
+    # Sort by total spent descending
+    competitors.sort(key=lambda c: c["total_spent"], reverse=True)
+
+    return {"competitors": competitors}
+
+
+# ---------------------------------------------------------------------------
+# Feature 4: Field Entry Handling
+# ---------------------------------------------------------------------------
+
+
+@router.get("/field-value")
+async def get_field_value():
+    """Calculate the combined probability and EV of all unsold golfers (the Field)."""
+    import math
+
+    store = get_store()
+    golfers = store["golfers"]
+    state: AuctionState = store["auction_state"]
+    config = store["config"]
+
+    remaining_golfers = [
+        golfers[gid] for gid in state.golfers_remaining if gid in golfers
+    ]
+
+    if not remaining_golfers:
+        return {
+            "num_golfers": 0,
+            "combined_win_prob": 0.0,
+            "combined_top5_prob": 0.0,
+            "combined_top10_prob": 0.0,
+            "combined_top20_prob": 0.0,
+            "combined_make_cut_prob": 0.0,
+            "combined_ev": 0.0,
+            "recommended_max_bid": 0.0,
+            "individual_golfers": [],
+        }
+
+    ev_calc = store.get("ev_calculator") or EVCalculator()
+
+    # Combined probability: 1 - product(1 - p_i) for each category
+    combined_win = 1.0 - math.prod(1.0 - g.model_win_prob for g in remaining_golfers)
+    combined_top5 = 1.0 - math.prod(1.0 - g.model_top5_prob for g in remaining_golfers)
+    combined_top10 = 1.0 - math.prod(1.0 - g.model_top10_prob for g in remaining_golfers)
+    combined_top20 = 1.0 - math.prod(1.0 - g.model_top20_prob for g in remaining_golfers)
+    combined_make_cut = 1.0 - math.prod(1.0 - g.model_cut_prob for g in remaining_golfers)
+
+    # Individual EVs and combined EV
+    individual_golfers = []
+    combined_ev = 0.0
+    for g in remaining_golfers:
+        ev_result = ev_calc.calculate_ev(
+            {
+                "win_prob": g.model_win_prob,
+                "top5_prob": g.model_top5_prob,
+                "top10_prob": g.model_top10_prob,
+            },
+            0.0,
+            state.total_pool if state.total_pool > 0 else config.get("total_pool", 0),
+        )
+        ev = ev_result["expected_payout"]
+        combined_ev += ev
+        individual_golfers.append({
+            "name": g.name,
+            "golfer_id": g.id,
+            "win_prob": round(g.model_win_prob, 6),
+            "ev": round(ev, 2),
+        })
+
+    # Sort by EV descending
+    individual_golfers.sort(key=lambda x: x["ev"], reverse=True)
+
+    # Recommended max bid using Kelly criterion on combined win probability
+    # Kelly fraction: f* = (bp - q) / b where b = odds, p = prob, q = 1-p
+    pool = state.total_pool if state.total_pool > 0 else config.get("total_pool", 0)
+    if pool > 0 and combined_win > 0:
+        # Use the top prize (1st place) payout as the return multiple
+        first_pct = config.get("payout_structure", {}).get("1st", 0.5)
+        b = (pool * first_pct)  # potential winnings if field wins
+        # Kelly: recommended_max = combined_ev * some fraction
+        # Simpler: use 85% of combined EV as max bid (same as alerts logic)
+        recommended_max = round(combined_ev * 0.85, 2)
+    else:
+        recommended_max = 0.0
+
+    return {
+        "num_golfers": len(remaining_golfers),
+        "combined_win_prob": round(combined_win, 6),
+        "combined_top5_prob": round(combined_top5, 6),
+        "combined_top10_prob": round(combined_top10, 6),
+        "combined_top20_prob": round(combined_top20, 6),
+        "combined_make_cut_prob": round(combined_make_cut, 6),
+        "combined_ev": round(combined_ev, 2),
+        "recommended_max_bid": recommended_max,
+        "individual_golfers": individual_golfers,
+    }
