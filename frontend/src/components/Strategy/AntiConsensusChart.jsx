@@ -9,7 +9,6 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { formatPctRaw } from '../../utils/format';
 
 export default function AntiConsensusChart({ data }) {
   if (!data?.length) {
@@ -23,9 +22,9 @@ export default function AntiConsensusChart({ data }) {
   const chartData = data.slice(0, 15).map((d) => ({
     name: d.name?.split(' ').pop() || d.name,
     fullName: d.name,
-    model: (d.model_prob || 0) * 100,
-    consensus: (d.consensus_prob || 0) * 100,
-    undervalued: (d.model_prob || 0) > (d.consensus_prob || 0),
+    model: (d.model_win_prob || 0) * 100,
+    consensus: (d.consensus_win_prob || 0) * 100,
+    undervalued: (d.model_win_prob || 0) > (d.consensus_win_prob || 0),
   }));
 
   return (

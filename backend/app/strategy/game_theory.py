@@ -83,8 +83,9 @@ class BidderModel:
         Returns:
             Dict of behavioral factor classifications and magnitudes.
         """
-        golfer_id = golfer.get("id", golfer.get("golfer_id", "")).lower()
-        name = golfer.get("name", "").lower()
+        # Normalize name for _MARQUEE_NAMES lookup (set uses "tiger_woods" format)
+        name = golfer.get("name", golfer.get("golfer_id", "")).lower().replace(" ", "_")
+        name_lower = golfer.get("name", "").lower()
         ranking = golfer.get("world_ranking", 50)
         form_score = golfer.get("recent_form_score", 50.0)
         masters_apps = golfer.get("masters_appearances", 0)
@@ -100,7 +101,7 @@ class BidderModel:
         }
 
         # Fame: marquee name or top-5 world ranking
-        if golfer_id in _MARQUEE_NAMES or any(n in name for n in ["tiger", "rory", "scottie", "spieth"]):
+        if name in _MARQUEE_NAMES or any(n in name_lower for n in ["tiger", "rory", "scottie", "spieth"]):
             factors["is_marquee"] = True
             factors["fame_factor"] = self.fame_premium
         elif ranking <= 5:

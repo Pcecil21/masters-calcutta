@@ -10,30 +10,9 @@ from fastapi import APIRouter
 
 from app.data.loaders import get_store
 from app.schemas import Golfer, Portfolio, PortfolioEntry
+from app.strategy.ev_calculator import EVCalculator
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
-
-
-def _compute_golfer_ev(golfer: Golfer, config: dict) -> float:
-    """Compute dollar EV for a golfer."""
-    pool = config.get("total_pool", 0.0)
-    ps = config.get("payout_structure", {})
-    if pool <= 0:
-        return 0.0
-
-    ev = 0.0
-    ev += golfer.model_win_prob * pool * ps.get("1st", 0.50)
-    p_2nd = max(0, (golfer.model_top5_prob - golfer.model_win_prob) * 0.3)
-    ev += p_2nd * pool * ps.get("2nd", 0.20)
-    p_3rd = max(0, (golfer.model_top5_prob - golfer.model_win_prob) * 0.25)
-    ev += p_3rd * pool * ps.get("3rd", 0.10)
-    p_top5_rest = max(0, (golfer.model_top5_prob - golfer.model_win_prob) * 0.45)
-    ev += p_top5_rest * pool * ps.get("top5", 0.05)
-    p_top10_rest = max(0, golfer.model_top10_prob - golfer.model_top5_prob)
-    ev += p_top10_rest * pool * ps.get("top10", 0.03)
-    p_cut_rest = max(0, golfer.model_cut_prob - golfer.model_top10_prob)
-    ev += p_cut_rest * pool * ps.get("made_cut", 0.01)
-    return round(ev, 2)
 
 
 @router.get("", response_model=Portfolio)
@@ -175,6 +154,8 @@ async def expected_payout() -> dict:
             "win_probability_any": 0,
         }
 
+    ev_calc = store.get("ev_calculator") or EVCalculator()
+
     projections = []
     total_ev = 0.0
     combined_miss_prob = 1.0  # probability NONE of my golfers win
@@ -184,30 +165,13 @@ async def expected_payout() -> dict:
         if golfer is None:
             continue
 
-        tier_ev = {
-            "1st": round(golfer.model_win_prob * pool * ps.get("1st", 0.50), 2),
-            "2nd": round(
-                max(0, (golfer.model_top5_prob - golfer.model_win_prob) * 0.3)
-                * pool * ps.get("2nd", 0.20), 2
-            ),
-            "3rd": round(
-                max(0, (golfer.model_top5_prob - golfer.model_win_prob) * 0.25)
-                * pool * ps.get("3rd", 0.10), 2
-            ),
-            "top5": round(
-                max(0, (golfer.model_top5_prob - golfer.model_win_prob) * 0.45)
-                * pool * ps.get("top5", 0.05), 2
-            ),
-            "top10": round(
-                max(0, golfer.model_top10_prob - golfer.model_top5_prob)
-                * pool * ps.get("top10", 0.03), 2
-            ),
-            "made_cut": round(
-                max(0, golfer.model_cut_prob - golfer.model_top10_prob)
-                * pool * ps.get("made_cut", 0.01), 2
-            ),
+        golfer_probs = {
+            "win_prob": golfer.model_win_prob,
+            "top5_prob": golfer.model_top5_prob,
+            "top10_prob": golfer.model_top10_prob,
         }
-        golfer_ev = sum(tier_ev.values())
+        ev_result = ev_calc.calculate_ev(golfer_probs, entry.purchase_price, pool)
+        golfer_ev = ev_result["expected_payout"]
         total_ev += golfer_ev
         combined_miss_prob *= (1.0 - golfer.model_win_prob)
 
@@ -215,7 +179,7 @@ async def expected_payout() -> dict:
             "golfer_id": entry.golfer_id,
             "name": golfer.name,
             "purchase_price": entry.purchase_price,
-            "ev_by_tier": tier_ev,
+            "ev_by_tier": ev_result.get("payout_breakdown", {}),
             "total_ev": round(golfer_ev, 2),
             "ev_multiple": round(golfer_ev / entry.purchase_price, 2) if entry.purchase_price > 0 else 0,
             "model_win_prob": golfer.model_win_prob,

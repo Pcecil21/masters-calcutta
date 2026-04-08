@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   LineChart,
   Line,
@@ -10,11 +10,12 @@ import {
   Legend,
 } from 'recharts';
 import { History, Play, RefreshCw } from 'lucide-react';
-import { runBacktest } from '../api/client';
+import { runBacktest, getBacktestYears } from '../api/client';
 import { formatCurrency, formatPct } from '../utils/format';
 import StatCard from './common/StatCard';
 
 export default function BacktestPanel() {
+  const [availableYears, setAvailableYears] = useState([]);
   const [params, setParams] = useState({
     years: 5,
     strategy: 'value',
@@ -23,6 +24,12 @@ export default function BacktestPanel() {
   });
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    getBacktestYears()
+      .then(setAvailableYears)
+      .catch(() => setAvailableYears([]));
+  }, []);
 
   const handleRun = async () => {
     setLoading(true);
@@ -44,6 +51,12 @@ export default function BacktestPanel() {
           <History className="w-4 h-4 text-gold" />
           Backtest Configuration
         </h2>
+
+        {availableYears.length > 0 && (
+          <div className="text-xs text-gray-500 mb-3">
+            Available years: {availableYears.join(', ')}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div>

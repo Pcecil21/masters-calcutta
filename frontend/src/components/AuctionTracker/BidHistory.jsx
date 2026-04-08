@@ -4,9 +4,15 @@ import { useAuction } from '../../hooks/useAuction';
 import { formatCurrency } from '../../utils/format';
 
 export default function BidHistory() {
-  const { auction, undoLastBid } = useAuction();
-  const bids = auction?.bids || [];
+  const { bidHistory, golfers, undoLastBid } = useAuction();
+  const bids = bidHistory || [];
   const recent = [...bids].reverse().slice(0, 10);
+
+  // Helper to find golfer name from ID
+  const getGolferName = (golferId) => {
+    const golfer = golfers.find((g) => g.id === golferId);
+    return golfer?.name || `Golfer #${golferId}`;
+  };
 
   if (!recent.length) {
     return (
@@ -35,10 +41,6 @@ export default function BidHistory() {
       </div>
       <div className="max-h-64 overflow-y-auto space-y-1">
         {recent.map((bid, i) => {
-          const isOver =
-            bid.model_value && bid.price > bid.model_value;
-          const isUnder =
-            bid.model_value && bid.price <= bid.model_value;
           return (
             <div
               key={i}
@@ -51,29 +53,14 @@ export default function BidHistory() {
                 {bids.length - i}
               </span>
               <span className="flex-1 text-white font-medium truncate">
-                {bid.golfer_name}
+                {getGolferName(bid.golfer_id)}
               </span>
               <span className="text-gray-400 truncate max-w-[80px]">
                 {bid.buyer}
               </span>
-              <span
-                className={clsx(
-                  'font-mono font-bold',
-                  isUnder ? 'text-green-400' : isOver ? 'text-red-400' : 'text-gray-300'
-                )}
-              >
+              <span className="font-mono font-bold text-gray-300">
                 {formatCurrency(bid.price)}
               </span>
-              {bid.model_value && (
-                <span
-                  className={clsx(
-                    'text-[10px]',
-                    isUnder ? 'text-green-600' : 'text-red-600'
-                  )}
-                >
-                  {isUnder ? 'UNDER' : 'OVER'}
-                </span>
-              )}
             </div>
           );
         })}

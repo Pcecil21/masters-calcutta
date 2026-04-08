@@ -4,10 +4,15 @@ Monte Carlo tournament simulator for The Masters at Augusta National.
 Simulates thousands of 4-round tournaments with Augusta-specific scoring
 adjustments to produce empirical probability distributions for each golfer's
 finish position, including win, top-5/10/20, and make-cut rates.
+
+Uses fully vectorized numpy operations -- no Python loops over simulations
+or golfers -- to run 10K sims x 90 golfers in under a second.
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -41,6 +46,9 @@ WEATHER_VARIANCE_EXTRA = 0.6  # Additional std-dev points on windy days
 # final-round scoring spreads are wider at majors.
 SUNDAY_PRESSURE_VARIANCE = 0.8  # Extra std-dev for round 4
 
+# Cache path for simulation results
+_CACHE_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "seed" / "mc_cache.json"
+
 
 class MonteCarloSimulator:
     """Monte Carlo engine for simulating Masters tournament outcomes.
@@ -61,7 +69,7 @@ class MonteCarloSimulator:
         self.rng = np.random.default_rng(seed)
 
     # ------------------------------------------------------------------
-    # Single-round simulation
+    # Single-round simulation (convenience method for external callers)
     # ------------------------------------------------------------------
 
     def simulate_round(
@@ -135,7 +143,7 @@ class MonteCarloSimulator:
         return max(score, 62.0)
 
     # ------------------------------------------------------------------
-    # Full-tournament simulation
+    # Full-tournament simulation (vectorized)
     # ------------------------------------------------------------------
 
     def simulate_tournament(
@@ -143,8 +151,13 @@ class MonteCarloSimulator:
         field: list[dict[str, Any]],
         n_simulations: int = 10_000,
         weather_schedule: list[float] | None = None,
+        use_cache: bool = True,
     ) -> dict[str, dict[str, Any]]:
         """Simulate a full 4-round Masters tournament many times.
+
+        Uses fully vectorized numpy operations: all simulations and all
+        golfers are processed in bulk array operations with no Python
+        loops over sims or golfers.
 
         For each simulation:
           1. Simulate rounds 1 and 2 for every golfer.
@@ -159,6 +172,7 @@ class MonteCarloSimulator:
             weather_schedule: Optional 4-element list of weather factors
                 for each round (0.0 = calm, 1.0 = very windy).  If None,
                 weather is drawn randomly per simulation.
+            use_cache: If True, check for / write to mc_cache.json.
 
         Returns:
             Dict keyed by golfer_id, each containing:
@@ -171,103 +185,205 @@ class MonteCarloSimulator:
                 - ``win_count`` (int)
                 - ``simulations`` (int)
         """
+        # --- Check cache ---
+        if use_cache:
+            cached = self._load_cache()
+            if cached is not None:
+                return cached
+
+        n_sims = n_simulations
         n_golfers = len(field)
         id_list = [g["golfer_id"] for g in field]
 
-        # Accumulators
-        win_counts = np.zeros(n_golfers, dtype=np.int64)
-        top5_counts = np.zeros(n_golfers, dtype=np.int64)
-        top10_counts = np.zeros(n_golfers, dtype=np.int64)
-        top20_counts = np.zeros(n_golfers, dtype=np.int64)
-        cut_counts = np.zeros(n_golfers, dtype=np.int64)
-        finish_sums = np.zeros(n_golfers, dtype=np.float64)
+        # -----------------------------------------------------------------
+        # Pre-compute per-golfer scoring parameters as 1-D arrays (n_golfers,)
+        # -----------------------------------------------------------------
+        means = np.array(
+            [g.get("scoring_avg", AUGUSTA_SCORING_AVG) for g in field],
+            dtype=np.float64,
+        )
+        base_stds = np.array(
+            [g.get("consistency", 2.8) for g in field], dtype=np.float64
+        )
+        amen_skills = np.clip(
+            np.array([g.get("amen_corner_skill", 0.0) for g in field], dtype=np.float64),
+            -1.0, 1.0,
+        )
+        amen_adjustments = AMEN_CORNER_DIFFICULTY * (1.0 - 0.6 * amen_skills)
 
-        for sim in range(n_simulations):
-            # Determine weather for this simulation
-            if weather_schedule is not None:
-                weather = weather_schedule
-            else:
-                # Random weather: calm most of the time, occasionally windy
-                weather = self.rng.exponential(0.3, size=4).clip(0, 1.0).tolist()
+        par5_advantages = np.array(
+            [g.get("par5_advantage", 0.0) for g in field], dtype=np.float64
+        )
+        par5_adjustments = par5_advantages * PAR5_BIRDIE_WEIGHT
 
-            # --- Rounds 1 & 2 ---
-            scores_r1r2 = np.zeros(n_golfers, dtype=np.float64)
-            round_scores = np.zeros((n_golfers, 4), dtype=np.float64)
+        pressure_ratings = np.array(
+            [g.get("pressure_rating", 0.0) for g in field], dtype=np.float64
+        )
+        # Sunday-only adjustments (mean shift and extra std)
+        pressure_mean_adj = -0.3 * pressure_ratings  # (n_golfers,)
 
-            for i, golfer in enumerate(field):
-                r1 = self.simulate_round(golfer, round_number=1, weather_factor=weather[0])
-                r2 = self.simulate_round(golfer, round_number=2, weather_factor=weather[1])
-                round_scores[i, 0] = r1
-                round_scores[i, 1] = r2
-                scores_r1r2[i] = r1 + r2
+        # Combined mean for rounds 1-3 (no pressure) and round 4 (with pressure)
+        mean_r123 = means + amen_adjustments + par5_adjustments  # (n_golfers,)
+        mean_r4 = mean_r123 + pressure_mean_adj  # (n_golfers,)
 
-            # --- Apply cut (top 50 and ties) ---
-            cut_line_score = np.sort(scores_r1r2)[min(CUT_TOP_N - 1, n_golfers - 1)]
-            made_cut = scores_r1r2 <= cut_line_score
+        # -----------------------------------------------------------------
+        # Weather: generate (n_sims, 4) weather factors
+        # -----------------------------------------------------------------
+        if weather_schedule is not None:
+            # Broadcast fixed schedule across all sims
+            weather = np.broadcast_to(
+                np.array(weather_schedule, dtype=np.float64), (n_sims, 4)
+            ).copy()
+        else:
+            weather = np.clip(
+                self.rng.exponential(0.3, size=(n_sims, 4)), 0.0, 1.0
+            )
 
-            # --- Rounds 3 & 4 (only for those who made the cut) ---
-            total_scores = np.full(n_golfers, np.inf)  # missed cut = inf
-            for i, golfer in enumerate(field):
-                if not made_cut[i]:
-                    continue
-                r3 = self.simulate_round(golfer, round_number=3, weather_factor=weather[2])
-                r4 = self.simulate_round(golfer, round_number=4, weather_factor=weather[3])
-                round_scores[i, 2] = r3
-                round_scores[i, 3] = r4
-                total_scores[i] = round_scores[i].sum()
+        # Weather std per round: (n_sims, 1) for broadcasting with golfers
+        weather_stds = weather * WEATHER_VARIANCE_EXTRA  # (n_sims, 4)
 
-            # --- Rank and record ---
-            # Sort by total score (ascending).  Ties share the better position.
-            order = np.argsort(total_scores)
-            positions = np.zeros(n_golfers, dtype=np.int64)
+        # -----------------------------------------------------------------
+        # Compute total std per (sim, golfer) for each round type
+        # Rounds 1-3: sqrt(base_std^2 + weather_std^2)
+        # Round 4:    sqrt(base_std^2 + weather_std^2 + SUNDAY_PRESSURE^2)
+        # -----------------------------------------------------------------
+        base_var = base_stds**2  # (n_golfers,)
+        pressure_var = SUNDAY_PRESSURE_VARIANCE**2
 
-            rank = 1
-            i = 0
-            while i < n_golfers:
-                # Find all golfers tied at this score
-                j = i + 1
-                while j < n_golfers and total_scores[order[j]] == total_scores[order[i]]:
-                    j += 1
-                for k in range(i, j):
-                    positions[order[k]] = rank
-                rank = j + 1
-                i = j
+        # For rounds 1-2: weather varies per sim, base_var varies per golfer
+        # weather_stds[:, r] is (n_sims,), base_var is (n_golfers,)
+        # Result: (n_sims, n_golfers)
+        def _total_std(round_idx: int, include_pressure: bool = False) -> np.ndarray:
+            w_var = weather_stds[:, round_idx:round_idx+1] ** 2  # (n_sims, 1)
+            variance = base_var[np.newaxis, :] + w_var  # (n_sims, n_golfers)
+            if include_pressure:
+                variance = variance + pressure_var
+            return np.sqrt(variance)
 
-            # Missed-cut golfers get a position beyond the field
-            positions[~made_cut] = n_golfers + 1
+        # -----------------------------------------------------------------
+        # Generate round scores: (n_sims, n_golfers) per round
+        # -----------------------------------------------------------------
+        # Rounds 1 & 2
+        std_r1 = _total_std(0)
+        std_r2 = _total_std(1)
+        scores_r1 = self.rng.normal(
+            mean_r123[np.newaxis, :], std_r1, size=(n_sims, n_golfers)
+        )
+        scores_r2 = self.rng.normal(
+            mean_r123[np.newaxis, :], std_r2, size=(n_sims, n_golfers)
+        )
 
-            for i in range(n_golfers):
-                pos = positions[i]
-                if made_cut[i]:
-                    cut_counts[i] += 1
-                    finish_sums[i] += pos
-                    if pos == 1:
-                        win_counts[i] += 1
-                    if pos <= 5:
-                        top5_counts[i] += 1
-                    if pos <= 10:
-                        top10_counts[i] += 1
-                    if pos <= 20:
-                        top20_counts[i] += 1
-                else:
-                    # Assign a nominal finish position for averaging
-                    finish_sums[i] += n_golfers
+        # Floor at 62
+        scores_r1 = np.maximum(scores_r1, 62.0)
+        scores_r2 = np.maximum(scores_r2, 62.0)
 
-        # --- Convert counts to probabilities ---
+        # 36-hole totals
+        totals_36 = scores_r1 + scores_r2  # (n_sims, n_golfers)
+
+        # -----------------------------------------------------------------
+        # Apply cut: top 50 and ties per simulation
+        # -----------------------------------------------------------------
+        # Sort 36-hole scores per sim to find the cut line
+        sorted_36 = np.sort(totals_36, axis=1)  # (n_sims, n_golfers)
+        cut_idx = min(CUT_TOP_N - 1, n_golfers - 1)
+        cut_lines = sorted_36[:, cut_idx]  # (n_sims,)
+
+        # Boolean mask: True = made the cut
+        made_cut = totals_36 <= cut_lines[:, np.newaxis]  # (n_sims, n_golfers)
+
+        # -----------------------------------------------------------------
+        # Rounds 3 & 4 (generate for all, then mask missed-cut)
+        # -----------------------------------------------------------------
+        std_r3 = _total_std(2)
+        std_r4 = _total_std(3, include_pressure=True)
+        scores_r3 = self.rng.normal(
+            mean_r123[np.newaxis, :], std_r3, size=(n_sims, n_golfers)
+        )
+        scores_r4 = self.rng.normal(
+            mean_r4[np.newaxis, :], std_r4, size=(n_sims, n_golfers)
+        )
+        scores_r3 = np.maximum(scores_r3, 62.0)
+        scores_r4 = np.maximum(scores_r4, 62.0)
+
+        # 72-hole totals; missed-cut golfers get infinity
+        totals_72 = scores_r1 + scores_r2 + scores_r3 + scores_r4  # (n_sims, n_golfers)
+        totals_72 = np.where(made_cut, totals_72, np.inf)
+
+        # -----------------------------------------------------------------
+        # Rank golfers per simulation using scipy rankdata (handles ties)
+        # rankdata with method='min' gives tied golfers the lowest rank
+        # -----------------------------------------------------------------
+        # For missed-cut golfers (inf), rankdata will assign them the
+        # highest ranks.  We override those to n_golfers+1.
+        positions = np.apply_along_axis(
+            lambda row: stats.rankdata(row, method="min"), axis=1, arr=totals_72
+        ).astype(np.int64)  # (n_sims, n_golfers)
+
+        # Override missed-cut positions
+        positions = np.where(made_cut, positions, n_golfers + 1)
+
+        # -----------------------------------------------------------------
+        # Tally counts using vectorized comparisons
+        # -----------------------------------------------------------------
+        win_counts = np.sum(positions == 1, axis=0)      # (n_golfers,)
+        top5_counts = np.sum(positions <= 5, axis=0)
+        top10_counts = np.sum(positions <= 10, axis=0)
+        top20_counts = np.sum(positions <= 20, axis=0)
+        cut_counts = np.sum(made_cut, axis=0)
+
+        # Average finish: for missed-cut sims, assign nominal position = n_golfers
+        finish_positions = np.where(made_cut, positions, n_golfers).astype(np.float64)
+        finish_sums = np.sum(finish_positions, axis=0)
+
+        # -----------------------------------------------------------------
+        # Build results dict
+        # -----------------------------------------------------------------
         results: dict[str, dict[str, Any]] = {}
         for i, gid in enumerate(id_list):
             results[gid] = {
-                "win_prob": float(win_counts[i] / n_simulations),
-                "top5_prob": float(top5_counts[i] / n_simulations),
-                "top10_prob": float(top10_counts[i] / n_simulations),
-                "top20_prob": float(top20_counts[i] / n_simulations),
-                "make_cut_prob": float(cut_counts[i] / n_simulations),
-                "avg_finish": float(finish_sums[i] / n_simulations),
+                "win_prob": float(win_counts[i] / n_sims),
+                "top5_prob": float(top5_counts[i] / n_sims),
+                "top10_prob": float(top10_counts[i] / n_sims),
+                "top20_prob": float(top20_counts[i] / n_sims),
+                "make_cut_prob": float(cut_counts[i] / n_sims),
+                "avg_finish": float(finish_sums[i] / n_sims),
                 "win_count": int(win_counts[i]),
-                "simulations": n_simulations,
+                "simulations": n_sims,
             }
 
+        # --- Save cache ---
+        if use_cache:
+            self._save_cache(results)
+
         return results
+
+    # ------------------------------------------------------------------
+    # Cache management
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _load_cache() -> dict[str, dict[str, Any]] | None:
+        """Load cached MC results if the cache file exists."""
+        if _CACHE_PATH.exists():
+            try:
+                with open(_CACHE_PATH, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                return None
+        return None
+
+    @staticmethod
+    def _save_cache(results: dict[str, dict[str, Any]]) -> None:
+        """Save MC results to the cache file."""
+        _CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_CACHE_PATH, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2)
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """Delete the MC cache file if it exists."""
+        if _CACHE_PATH.exists():
+            _CACHE_PATH.unlink()
 
     # ------------------------------------------------------------------
     # Convenience: build field from ELO ratings

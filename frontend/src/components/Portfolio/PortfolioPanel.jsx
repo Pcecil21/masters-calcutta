@@ -40,7 +40,7 @@ const PIE_COLORS = [
 ];
 
 export default function PortfolioPanel() {
-  const { portfolio: ctxPortfolio } = useAuction();
+  const { portfolio: ctxPortfolio, golfers } = useAuction();
   const [portfolio, setPortfolio] = useState(null);
   const [optimization, setOptimization] = useState(null);
   const [payout, setPayout] = useState(null);
@@ -66,6 +66,12 @@ export default function PortfolioPanel() {
     fetchData();
   }, [ctxPortfolio]);
 
+  // Helper to find golfer name from ID
+  const getGolferName = (golferId) => {
+    const golfer = golfers.find((g) => g.id === golferId);
+    return golfer?.name || `Golfer #${golferId}`;
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -74,20 +80,17 @@ export default function PortfolioPanel() {
     );
   }
 
-  const holdings = portfolio?.holdings || [];
-  const totalInvested = holdings.reduce((s, h) => s + (h.price || 0), 0);
-  const totalEV = holdings.reduce(
-    (s, h) => s + (h.expected_value || h.model_value || 0),
-    0
-  );
-  const expectedROI = totalInvested > 0 ? (totalEV - totalInvested) / totalInvested : 0;
+  // Portfolio API returns: entries[], total_invested, total_expected_value, expected_roi, risk_score
+  const entries = portfolio?.entries || [];
+  const totalInvested = portfolio?.total_invested || 0;
+  const totalEV = portfolio?.total_expected_value || 0;
+  const expectedROI = portfolio?.expected_roi || 0;
   const riskScore = portfolio?.risk_score;
-  const diversificationScore = portfolio?.diversification_score;
   const needRecs = optimization?.recommendations || [];
 
-  const pieData = holdings.map((h) => ({
-    name: h.golfer_name || h.name,
-    value: h.price || 0,
+  const pieData = entries.map((h) => ({
+    name: getGolferName(h.golfer_id),
+    value: h.purchase_price || 0,
   }));
 
   return (
@@ -133,7 +136,7 @@ export default function PortfolioPanel() {
             My Holdings
           </h2>
 
-          {holdings.length === 0 ? (
+          {entries.length === 0 ? (
             <div className="text-center py-8 text-gray-600 text-sm">
               No golfers in portfolio yet. Win some bids!
             </div>
@@ -143,41 +146,37 @@ export default function PortfolioPanel() {
               <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] uppercase tracking-wider text-gray-600 border-b border-gray-700/50 mb-1">
                 <span className="flex-1">Golfer</span>
                 <span className="w-20 text-right">Price</span>
-                <span className="w-20 text-right">Model Val</span>
+                <span className="w-16 text-right">Win%</span>
                 <span className="w-16 text-right">EV</span>
                 <span className="w-16 text-right">EV Mult</span>
               </div>
               <div className="space-y-0.5 max-h-72 overflow-y-auto">
-                {holdings.map((h, i) => {
-                  const mult =
-                    h.price > 0
-                      ? (h.expected_value || h.model_value || 0) / h.price
-                      : 0;
+                {entries.map((h, i) => {
                   return (
                     <div
                       key={i}
                       className="flex items-center gap-2 px-3 py-2 rounded hover:bg-gray-800/60 text-xs transition-colors"
                     >
                       <span className="flex-1 text-white font-medium truncate">
-                        {h.golfer_name || h.name}
+                        {getGolferName(h.golfer_id)}
                       </span>
                       <span className="w-20 text-right text-gray-300 font-mono">
-                        {formatCurrency(h.price)}
+                        {formatCurrency(h.purchase_price)}
                       </span>
-                      <span className="w-20 text-right text-gray-400 font-mono">
-                        {formatCurrency(h.model_value)}
+                      <span className="w-16 text-right text-green-400 font-mono">
+                        {formatPct(h.model_win_prob)}
                       </span>
                       <span
-                        className={`w-16 text-right font-mono font-bold ${evColor(h.ev)}`}
+                        className={`w-16 text-right font-mono font-bold ${evColor(h.expected_value)}`}
                       >
-                        {h.ev?.toFixed(2) || '--'}
+                        {h.expected_value?.toFixed(2) || '--'}
                       </span>
                       <span
                         className={`w-16 text-right font-mono font-bold ${
-                          mult >= 1 ? 'text-green-400' : 'text-red-400'
+                          (h.ev_multiple || 0) >= 1 ? 'text-green-400' : 'text-red-400'
                         }`}
                       >
-                        {formatMultiplier(mult)}
+                        {formatMultiplier(h.ev_multiple)}
                       </span>
                     </div>
                   );
@@ -228,29 +227,6 @@ export default function PortfolioPanel() {
                   />
                 </PieChart>
               </ResponsiveContainer>
-            </div>
-          )}
-
-          {/* Diversification Score */}
-          {diversificationScore != null && (
-            <div className="mt-3 flex items-center justify-between px-2">
-              <span className="text-[10px] uppercase text-gray-500 flex items-center gap-1">
-                <Shield className="w-3 h-3" />
-                Diversification
-              </span>
-              <div className="flex items-center gap-2">
-                <div className="w-24 h-2 bg-gray-700 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-augusta rounded-full transition-all"
-                    style={{
-                      width: `${Math.min(100, diversificationScore * 10)}%`,
-                    }}
-                  />
-                </div>
-                <span className="text-xs text-gray-300 font-mono">
-                  {diversificationScore.toFixed(1)}
-                </span>
-              </div>
             </div>
           )}
         </div>

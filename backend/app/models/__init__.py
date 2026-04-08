@@ -15,6 +15,7 @@ from .elo import GolfEloModel
 from .monte_carlo import MonteCarloSimulator
 from .regression import RegressionModel
 from .ensemble import EnsembleModel
+from .pipeline import generate_model_probabilities
 
 __all__ = [
     "normalize_probabilities",
@@ -25,4 +26,5 @@ __all__ = [
     "MonteCarloSimulator",
     "RegressionModel",
     "EnsembleModel",
+    "generate_model_probabilities",
 ]

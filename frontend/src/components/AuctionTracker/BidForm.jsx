@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import clsx from 'clsx';
 import { DollarSign, User, Search } from 'lucide-react';
 import { useAuction } from '../../hooks/useAuction';
@@ -15,8 +15,8 @@ export default function BidForm({ preselectedGolfer, onClearPreselect }) {
   const [submitting, setSubmitting] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
 
-  // Sync preselected golfer
-  useMemo(() => {
+  // Sync preselected golfer (side effect, not memoized value)
+  useEffect(() => {
     if (preselectedGolfer?.id) {
       setSelectedGolferId(preselectedGolfer.id);
       setSearch(preselectedGolfer.name || '');
@@ -24,11 +24,9 @@ export default function BidForm({ preselectedGolfer, onClearPreselect }) {
   }, [preselectedGolfer]);
 
   const remaining = useMemo(() => {
-    const soldIds = new Set(
-      (auction?.bids || []).map((b) => b.golfer_id)
-    );
+    const soldIds = new Set(auction?.golfers_sold || []);
     return golfers.filter((g) => !soldIds.has(g.id));
-  }, [golfers, auction]);
+  }, [golfers, auction?.golfers_sold]);
 
   const filtered = useMemo(() => {
     if (!search) return remaining;
@@ -39,9 +37,10 @@ export default function BidForm({ preselectedGolfer, onClearPreselect }) {
   const selectedGolfer = golfers.find((g) => g.id === selectedGolferId);
 
   const priceNum = parseFloat(price) || 0;
-  const modelValue = selectedGolfer?.model_value;
-  const isUnderValue = modelValue && priceNum > 0 && priceNum < modelValue;
-  const isOverValue = modelValue && priceNum > 0 && priceNum >= modelValue;
+  // Use ev_score as the model's dollar EV estimate
+  const modelValue = selectedGolfer?.ev_score ?? null;
+  const isUnderValue = modelValue != null && priceNum > 0 && priceNum < modelValue;
+  const isOverValue = modelValue != null && priceNum > 0 && priceNum >= modelValue;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -104,12 +103,12 @@ export default function BidForm({ preselectedGolfer, onClearPreselect }) {
               >
                 <span>
                   <span className="text-gray-500 font-mono mr-2 text-xs">
-                    {g.rank}
+                    {g.world_ranking}
                   </span>
                   {g.name}
                 </span>
                 <span className="text-xs text-gray-500">
-                  {formatPct(g.model_win_pct)}
+                  {formatPct(g.model_win_prob)}
                 </span>
               </button>
             ))}
@@ -127,17 +126,17 @@ export default function BidForm({ preselectedGolfer, onClearPreselect }) {
         <div className="flex items-center gap-3 text-xs bg-gray-800/60 rounded px-3 py-2 border border-gray-700/50">
           <span className="text-gray-500">Model Value:</span>
           <span className="font-bold text-gold">
-            {formatCurrency(modelValue)}
+            {modelValue != null ? formatCurrency(modelValue) : '--'}
           </span>
           <span className="text-gray-600">|</span>
           <span className="text-gray-500">Win%:</span>
           <span className="text-green-400 font-mono">
-            {formatPct(selectedGolfer.model_win_pct)}
+            {formatPct(selectedGolfer.model_win_prob)}
           </span>
           <span className="text-gray-600">|</span>
           <span className="text-gray-500">EV:</span>
           <span className="text-green-300 font-mono">
-            {selectedGolfer.ev?.toFixed(2) || '--'}
+            {selectedGolfer.ev_score?.toFixed(2) || '--'}
           </span>
         </div>
       )}
@@ -196,7 +195,7 @@ export default function BidForm({ preselectedGolfer, onClearPreselect }) {
       </div>
 
       {/* Price vs Value Feedback */}
-      {priceNum > 0 && modelValue && (
+      {priceNum > 0 && modelValue != null && (
         <div
           className={clsx(
             'text-xs px-3 py-1 rounded',

@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import clsx from 'clsx';
 import { AlertTriangle, TrendingUp } from 'lucide-react';
 import { useAuction } from '../../hooks/useAuction';
-import { formatCurrency, formatMultiplier } from '../../utils/format';
+import { formatCurrency } from '../../utils/format';
 
 export default function AlertTicker() {
   const { alerts } = useAuction();
@@ -10,7 +10,7 @@ export default function AlertTicker() {
   const highPriority = useMemo(
     () =>
       (alerts || []).filter(
-        (a) => a.level === 'MUST_BID' || a.level === 'STRONG_VALUE'
+        (a) => a.priority === 'high' || a.priority === 'critical' || a.alert_type === 'must_bid' || a.alert_type === 'strong_value'
       ),
     [alerts]
   );
@@ -24,7 +24,7 @@ export default function AlertTicker() {
       <div className="flex items-center h-full whitespace-nowrap animate-[scroll-left_30s_linear_infinite]">
         {highPriority.map((alert, i) => (
           <span key={i} className="inline-flex items-center gap-2 mx-6">
-            {alert.level === 'MUST_BID' ? (
+            {alert.alert_type === 'must_bid' || alert.priority === 'critical' ? (
               <AlertTriangle className="w-3.5 h-3.5 text-red-400 animate-pulse" />
             ) : (
               <TrendingUp className="w-3.5 h-3.5 text-orange-400" />
@@ -32,19 +32,23 @@ export default function AlertTicker() {
             <span
               className={clsx(
                 'text-xs font-bold',
-                alert.level === 'MUST_BID'
+                alert.alert_type === 'must_bid' || alert.priority === 'critical'
                   ? 'text-red-400'
                   : 'text-orange-400'
               )}
             >
-              {alert.golfer_name}
+              {alert.message}
             </span>
-            <span className="text-[10px] text-gray-500">
-              max {formatCurrency(alert.max_bid)}
-            </span>
-            <span className="text-[10px] text-gold font-mono">
-              {formatMultiplier(alert.ev_multiple)} EV
-            </span>
+            {alert.recommended_max != null && (
+              <span className="text-[10px] text-gray-500">
+                max {formatCurrency(alert.recommended_max)}
+              </span>
+            )}
+            {alert.current_price != null && (
+              <span className="text-[10px] text-gold font-mono">
+                @ {formatCurrency(alert.current_price)}
+              </span>
+            )}
           </span>
         ))}
         {/* Duplicate for seamless scroll */}
@@ -53,7 +57,7 @@ export default function AlertTicker() {
             key={`dup-${i}`}
             className="inline-flex items-center gap-2 mx-6"
           >
-            {alert.level === 'MUST_BID' ? (
+            {alert.alert_type === 'must_bid' || alert.priority === 'critical' ? (
               <AlertTriangle className="w-3.5 h-3.5 text-red-400 animate-pulse" />
             ) : (
               <TrendingUp className="w-3.5 h-3.5 text-orange-400" />
@@ -61,19 +65,23 @@ export default function AlertTicker() {
             <span
               className={clsx(
                 'text-xs font-bold',
-                alert.level === 'MUST_BID'
+                alert.alert_type === 'must_bid' || alert.priority === 'critical'
                   ? 'text-red-400'
                   : 'text-orange-400'
               )}
             >
-              {alert.golfer_name}
+              {alert.message}
             </span>
-            <span className="text-[10px] text-gray-500">
-              max {formatCurrency(alert.max_bid)}
-            </span>
-            <span className="text-[10px] text-gold font-mono">
-              {formatMultiplier(alert.ev_multiple)} EV
-            </span>
+            {alert.recommended_max != null && (
+              <span className="text-[10px] text-gray-500">
+                max {formatCurrency(alert.recommended_max)}
+              </span>
+            )}
+            {alert.current_price != null && (
+              <span className="text-[10px] text-gold font-mono">
+                @ {formatCurrency(alert.current_price)}
+              </span>
+            )}
           </span>
         ))}
       </div>

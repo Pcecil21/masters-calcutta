@@ -9,32 +9,18 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.data.loaders import get_store
-from app.schemas import AuctionState, Golfer, StrategyRecommendation
+from app.schemas import (
+    AuctionState,
+    Golfer,
+    PriceCheckRequest,
+    PriceCheckResponse,
+    QuickSheetEntry,
+    StrategyRecommendation,
+)
+from app.strategy.ev_calculator import EVCalculator
+from app.strategy.kelly import KellyCalculator
 
 router = APIRouter(prefix="/strategy", tags=["strategy"])
-
-
-def _compute_golfer_ev(golfer: Golfer, config: dict) -> float:
-    """Compute dollar EV for a golfer given payout structure."""
-    pool = config.get("total_pool", 0.0)
-    ps = config.get("payout_structure", {})
-    if pool <= 0:
-        return 0.0
-
-    ev = 0.0
-    ev += golfer.model_win_prob * pool * ps.get("1st", 0.50)
-    p_2nd = max(0, (golfer.model_top5_prob - golfer.model_win_prob) * 0.3)
-    ev += p_2nd * pool * ps.get("2nd", 0.20)
-    p_3rd = max(0, (golfer.model_top5_prob - golfer.model_win_prob) * 0.25)
-    ev += p_3rd * pool * ps.get("3rd", 0.10)
-    p_top5_rest = max(0, (golfer.model_top5_prob - golfer.model_win_prob) * 0.45)
-    ev += p_top5_rest * pool * ps.get("top5", 0.05)
-    p_top10_rest = max(0, golfer.model_top10_prob - golfer.model_top5_prob)
-    ev += p_top10_rest * pool * ps.get("top10", 0.03)
-    p_cut_rest = max(0, golfer.model_cut_prob - golfer.model_top10_prob)
-    ev += p_cut_rest * pool * ps.get("made_cut", 0.01)
-
-    return round(ev, 2)
 
 
 def _compute_max_bid(
@@ -46,20 +32,37 @@ def _compute_max_bid(
     """Compute the maximum recommended bid for a golfer.
 
     Factors:
-    - Dollar EV from payout structure
-    - Remaining bankroll constraints
+    - Dollar EV from payout structure (via EVCalculator)
+    - Kelly-criterion bankroll sizing
     - Auction phase (bid more aggressively early for top golfers)
     - Portfolio diversification needs
     """
-    ev = _compute_golfer_ev(golfer, config)
+    ev_calc = get_store().get("ev_calculator") or EVCalculator()
+    result = ev_calc.calculate_ev(
+        {
+            "win_prob": golfer.model_win_prob,
+            "top5_prob": golfer.model_top5_prob,
+            "top10_prob": golfer.model_top10_prob,
+        },
+        1.0,  # dummy price -- we only need expected_payout
+        config.get("total_pool", 0.0),
+    )
+    ev = result["expected_payout"]
     remaining = state.remaining_bankroll
     unsold_count = len(state.golfers_remaining)
 
     if remaining <= 0 or ev <= 0:
         return 0.0
 
-    # Base max bid: 85% of EV (never pay full EV)
-    base_max = ev * 0.85
+    # Kelly-based limit
+    kelly_max = KellyCalculator.max_bid(
+        win_prob=golfer.model_top10_prob,
+        expected_payout=ev,
+        bankroll=remaining,
+    )
+
+    # Base max bid: use Kelly as the foundation
+    base_max = kelly_max
 
     # Phase adjustment: in early rounds, allow slightly higher bids for elite golfers
     phase = state.current_phase
@@ -86,16 +89,25 @@ def _compute_max_bid(
 
 
 def _classify_alert_level(ev: float, max_bid: float, golfer: Golfer) -> str:
-    """Classify a golfer into an alert level."""
+    """Classify a golfer into an alert level based on EV multiple."""
     if ev <= 0:
         return "avoid"
-    if golfer.anti_consensus_score > 0.03 and golfer.model_win_prob > 0.05:
+
+    # Estimate market price from consensus probability
+    store = get_store()
+    config = store["config"]
+    pool = config.get("total_pool", 0.0)
+    estimated_price = golfer.consensus_win_prob * pool * 0.8 if pool > 0 else 0
+
+    ev_multiple = ev / estimated_price if estimated_price > 0 else 0
+
+    if ev_multiple >= 2.0:
         return "must_bid"
-    if golfer.anti_consensus_score > 0.01:
+    if ev_multiple >= 1.5:
         return "good_value"
-    if golfer.anti_consensus_score > -0.01:
+    if ev_multiple >= 1.0:
         return "fair"
-    if golfer.anti_consensus_score > -0.03:
+    if ev_multiple >= 0.5:
         return "overpriced"
     return "avoid"
 
@@ -130,6 +142,21 @@ def _build_reasoning(golfer: Golfer, ev: float, config: dict) -> str:
     return ". ".join(parts) if parts else "Standard recommendation based on model probabilities."
 
 
+def _get_ev_for_golfer(golfer: Golfer, config: dict) -> float:
+    """Get expected payout for a golfer using the shared EVCalculator."""
+    ev_calc = get_store().get("ev_calculator") or EVCalculator()
+    result = ev_calc.calculate_ev(
+        {
+            "win_prob": golfer.model_win_prob,
+            "top5_prob": golfer.model_top5_prob,
+            "top10_prob": golfer.model_top10_prob,
+        },
+        1.0,  # dummy price
+        config.get("total_pool", 0.0),
+    )
+    return result["expected_payout"]
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -157,7 +184,7 @@ async def get_recommendations() -> list[StrategyRecommendation]:
         if golfer is None:
             continue
 
-        ev = _compute_golfer_ev(golfer, config)
+        ev = _get_ev_for_golfer(golfer, config)
         max_bid = _compute_max_bid(golfer, config, state, portfolio_count)
         alert_level = _classify_alert_level(ev, max_bid, golfer)
         reasoning = _build_reasoning(golfer, ev, config)
@@ -179,6 +206,128 @@ async def get_recommendations() -> list[StrategyRecommendation]:
     return recs
 
 
+@router.post("/price-check", response_model=PriceCheckResponse)
+async def price_check(req: PriceCheckRequest) -> PriceCheckResponse:
+    """Real-time price check for a golfer during a live auction.
+
+    Given the auctioneer's current ask price, instantly evaluate whether
+    the user should bid or pass based on model EV and Kelly sizing.
+    """
+    store = get_store()
+    golfer = store["golfers"].get(req.golfer_id)
+    if golfer is None:
+        raise HTTPException(status_code=404, detail=f"Golfer {req.golfer_id} not found")
+
+    state: AuctionState = store["auction_state"]
+    config = store["config"]
+    total_pool = config.get("total_pool", 0.0) or (state.total_pool if state else 0.0)
+
+    ev_calc = store.get("ev_calculator") or EVCalculator()
+    golfer_probs = {
+        "win_prob": golfer.model_win_prob,
+        "top5_prob": golfer.model_top5_prob,
+        "top10_prob": golfer.model_top10_prob,
+    }
+
+    result = ev_calc.calculate_ev(golfer_probs, req.current_price, total_pool)
+    expected_payout = result["expected_payout"]
+    ev = result["ev"]
+    ev_multiple = result["ev_multiple"]
+
+    # Kelly-based max bid
+    portfolio = store["portfolio"]
+    portfolio_count = len(portfolio.entries) if portfolio else 0
+    max_bid = _compute_max_bid(golfer, config, state, portfolio_count)
+
+    # Verdict logic
+    if ev_multiple > 1.0 and req.current_price <= max_bid:
+        verdict = "BID"
+    elif ev_multiple < 0.8:
+        verdict = "PASS"
+    else:
+        verdict = "MARGINAL"
+
+    # Snappy message
+    name_short = golfer.name.split()[-1]  # last name
+    if verdict == "BID":
+        pct_under = ((expected_payout / req.current_price) - 1) * 100
+        message = (
+            f"{name_short} at ${req.current_price:.0f} is a steal - "
+            f"model says worth ${expected_payout:.0f} ({pct_under:.0f}% upside). BID."
+        )
+    elif verdict == "PASS":
+        pct_over = ((req.current_price / expected_payout) - 1) * 100 if expected_payout > 0 else 100
+        message = (
+            f"{name_short} at ${req.current_price:.0f} is "
+            f"{pct_over:.0f}% overpriced (worth ${expected_payout:.0f}). PASS."
+        )
+    else:
+        message = (
+            f"{name_short} at ${req.current_price:.0f} is close to fair value "
+            f"(${expected_payout:.0f}). Proceed with caution."
+        )
+
+    return PriceCheckResponse(
+        golfer_id=req.golfer_id,
+        golfer_name=golfer.name,
+        current_price=req.current_price,
+        expected_payout=round(expected_payout, 2),
+        ev=round(ev, 2),
+        ev_multiple=round(ev_multiple, 3),
+        max_bid=round(max_bid, 2),
+        verdict=verdict,
+        message=message,
+    )
+
+
+@router.get("/quick-sheet", response_model=list[QuickSheetEntry])
+async def quick_sheet() -> list[QuickSheetEntry]:
+    """Pre-computed cheat sheet for every remaining golfer.
+
+    Returns golfer_id, name, max_bid, breakeven_price, and alert_level
+    sorted by max_bid descending. Print this and bring it to the auction.
+    """
+    store = get_store()
+    golfers = store["golfers"]
+    state: AuctionState = store["auction_state"]
+    config = store["config"]
+    total_pool = config.get("total_pool", 0.0) or (state.total_pool if state else 0.0)
+    portfolio = store["portfolio"]
+    portfolio_count = len(portfolio.entries) if portfolio else 0
+
+    ev_calc = store.get("ev_calculator") or EVCalculator()
+    entries: list[QuickSheetEntry] = []
+
+    for gid in state.golfers_remaining:
+        golfer = golfers.get(gid)
+        if golfer is None:
+            continue
+
+        golfer_probs = {
+            "win_prob": golfer.model_win_prob,
+            "top5_prob": golfer.model_top5_prob,
+            "top10_prob": golfer.model_top10_prob,
+        }
+
+        breakeven = ev_calc.breakeven_price(golfer_probs, total_pool)
+        ev = _get_ev_for_golfer(golfer, config)
+        max_bid = _compute_max_bid(golfer, config, state, portfolio_count)
+        alert_level = _classify_alert_level(ev, max_bid, golfer)
+
+        entries.append(
+            QuickSheetEntry(
+                golfer_id=gid,
+                name=golfer.name,
+                max_bid=round(max_bid, 2),
+                breakeven_price=round(breakeven, 2),
+                alert_level=alert_level,
+            )
+        )
+
+    entries.sort(key=lambda e: e.max_bid, reverse=True)
+    return entries
+
+
 @router.get("/{golfer_id}/max-bid", response_model=StrategyRecommendation)
 async def get_max_bid(golfer_id: str) -> StrategyRecommendation:
     """Get the maximum recommended bid for a specific golfer."""
@@ -192,7 +341,7 @@ async def get_max_bid(golfer_id: str) -> StrategyRecommendation:
     portfolio = store["portfolio"]
     portfolio_count = len(portfolio.entries) if portfolio else 0
 
-    ev = _compute_golfer_ev(golfer, config)
+    ev = _get_ev_for_golfer(golfer, config)
     max_bid = _compute_max_bid(golfer, config, state, portfolio_count)
     alert_level = _classify_alert_level(ev, max_bid, golfer)
     reasoning = _build_reasoning(golfer, ev, config)
@@ -228,7 +377,7 @@ async def anti_consensus() -> list[StrategyRecommendation]:
 
     recs: list[StrategyRecommendation] = []
     for golfer in remaining_golfers:
-        ev = _compute_golfer_ev(golfer, config)
+        ev = _get_ev_for_golfer(golfer, config)
         max_bid = _compute_max_bid(golfer, config, state, portfolio_count)
         alert_level = _classify_alert_level(ev, max_bid, golfer)
         reasoning = _build_reasoning(golfer, ev, config)

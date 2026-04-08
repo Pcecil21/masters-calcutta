@@ -4,27 +4,38 @@ import { useAuction } from '../../hooks/useAuction';
 
 const PAYOUT_PRESETS = {
   standard: {
-    label: 'Standard (70/20/10)',
-    payouts: { '1st': 70, '2nd': 20, '3rd': 10 },
+    label: 'Standard (Top 10)',
+    payouts: {
+      '1st': 0.50,
+      '2nd': 0.20,
+      '3rd': 0.12,
+      '4th': 0.05,
+      '5th': 0.05,
+      '6th': 0.016,
+      '7th': 0.016,
+      '8th': 0.016,
+      '9th': 0.016,
+      '10th': 0.016,
+    },
   },
   deep: {
     label: 'Deep (50/25/15/10)',
-    payouts: { '1st': 50, '2nd': 25, '3rd': 15, '4th': 10 },
+    payouts: { '1st': 0.50, '2nd': 0.25, '3rd': 0.15, '4th': 0.10 },
   },
   flat: {
     label: 'Flat Top 5',
-    payouts: { '1st': 40, '2nd': 25, '3rd': 15, '4th': 12, '5th': 8 },
+    payouts: { '1st': 0.40, '2nd': 0.25, '3rd': 0.15, '4th': 0.12, '5th': 0.08 },
   },
   winner_take_all: {
     label: 'Winner Take All',
-    payouts: { '1st': 100 },
+    payouts: { '1st': 1.00 },
   },
 };
 
 export default function AuctionConfig({ open, onClose }) {
   const { auction, configure, reset } = useAuction();
-  const [poolSize, setPoolSize] = useState(auction?.pool_size || 5000);
-  const [bankroll, setBankroll] = useState(auction?.bankroll || 500);
+  const [poolSize, setPoolSize] = useState(auction?.total_pool || 5000);
+  const [bankroll, setBankroll] = useState(auction?.my_bankroll || 500);
   const [numBidders, setNumBidders] = useState(auction?.num_bidders || 10);
   const [preset, setPreset] = useState('standard');
   const [saving, setSaving] = useState(false);
@@ -35,8 +46,8 @@ export default function AuctionConfig({ open, onClose }) {
     setSaving(true);
     try {
       await configure({
-        pool_size: poolSize,
-        bankroll: bankroll,
+        total_pool: poolSize,
+        my_bankroll: bankroll,
         num_bidders: numBidders,
         payout_structure: PAYOUT_PRESETS[preset].payouts,
       });

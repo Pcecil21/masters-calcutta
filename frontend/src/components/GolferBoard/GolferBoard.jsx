@@ -3,34 +3,39 @@ import { Search, ChevronUp, ChevronDown, Filter } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuction } from '../../hooks/useAuction';
 import { formatPct, evColor } from '../../utils/format';
-import AlertBadge from '../common/AlertBadge';
 import GolferDetail from './GolferDetail';
 
 const COLUMNS = [
-  { key: 'rank', label: 'Rank', width: 'w-14', align: 'text-right' },
+  { key: 'world_ranking', label: 'Rank', width: 'w-14', align: 'text-right' },
   { key: 'name', label: 'Name', width: 'flex-1', align: 'text-left' },
-  { key: 'world_ranking', label: 'World', width: 'w-16', align: 'text-right' },
-  { key: 'odds', label: 'Odds', width: 'w-20', align: 'text-right' },
+  { key: 'odds_to_win', label: 'Odds', width: 'w-20', align: 'text-right' },
   {
-    key: 'model_win_pct',
+    key: 'model_win_prob',
     label: 'Win%',
     width: 'w-16',
     align: 'text-right',
     format: formatPct,
   },
   {
-    key: 'model_top5_pct',
+    key: 'model_top5_prob',
     label: 'Top5%',
     width: 'w-16',
     align: 'text-right',
     format: formatPct,
   },
   {
-    key: 'model_top10_pct',
+    key: 'model_top10_prob',
     label: 'Top10%',
     width: 'w-16',
     align: 'text-right',
     format: formatPct,
+  },
+  {
+    key: 'ev_score',
+    label: 'EV',
+    width: 'w-14',
+    align: 'text-right',
+    format: (v) => (v != null ? v.toFixed(2) : '--'),
   },
   {
     key: 'anti_consensus_score',
@@ -39,13 +44,12 @@ const COLUMNS = [
     align: 'text-right',
     format: (v) => (v != null ? v.toFixed(2) : '--'),
   },
-  { key: 'alert_level', label: 'Alert', width: 'w-20', align: 'text-center' },
 ];
 
 export default function GolferBoard() {
   const { golfers } = useAuction();
   const [search, setSearch] = useState('');
-  const [sortKey, setSortKey] = useState('rank');
+  const [sortKey, setSortKey] = useState('world_ranking');
   const [sortDir, setSortDir] = useState('asc');
   const [expandedId, setExpandedId] = useState(null);
 
@@ -132,32 +136,29 @@ export default function GolferBoard() {
                 className="flex items-center gap-2 px-4 py-2 hover:bg-augusta/5 cursor-pointer transition-colors text-sm"
               >
                 <span className="w-14 text-right text-gray-500 font-mono text-xs">
-                  {g.rank || '--'}
+                  {g.world_ranking || '--'}
                 </span>
                 <span className="flex-1 text-white font-medium truncate">
                   {g.name}
                 </span>
-                <span className="w-16 text-right text-gray-400 font-mono text-xs">
-                  {g.world_ranking || '--'}
-                </span>
                 <span className="w-20 text-right text-gray-400 font-mono text-xs">
-                  {g.odds || '--'}
+                  {g.odds_to_win || '--'}
                 </span>
                 <span className="w-16 text-right text-green-400 font-mono text-xs">
-                  {formatPct(g.model_win_pct)}
+                  {formatPct(g.model_win_prob)}
                 </span>
                 <span className="w-16 text-right text-green-300 font-mono text-xs">
-                  {formatPct(g.model_top5_pct)}
+                  {formatPct(g.model_top5_prob)}
                 </span>
                 <span className="w-16 text-right text-yellow-300 font-mono text-xs">
-                  {formatPct(g.model_top10_pct)}
+                  {formatPct(g.model_top10_prob)}
+                </span>
+                <span className={`w-14 text-right font-mono text-xs ${evColor(g.ev_score)}`}>
+                  {g.ev_score != null ? g.ev_score.toFixed(2) : '--'}
                 </span>
                 <span className="w-18 text-right text-gray-300 font-mono text-xs">
                   {g.anti_consensus_score?.toFixed(2) || '--'}
                 </span>
-                <div className="w-20 flex justify-center">
-                  {g.alert_level && <AlertBadge level={g.alert_level} />}
-                </div>
               </div>
 
               {/* Expanded Detail */}

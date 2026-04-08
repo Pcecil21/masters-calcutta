@@ -13,6 +13,7 @@ import { formatCurrency, formatPct, evColor } from '../../utils/format';
 import StatCard from '../common/StatCard';
 import AlertBadge from '../common/AlertBadge';
 import BidForm from './BidForm';
+import QuickPrice from './QuickPrice';
 import AlertTicker from './AlertTicker';
 import BidHistory from './BidHistory';
 import AuctionConfig from './AuctionConfig';
@@ -25,17 +26,14 @@ export default function AuctionPanel() {
   // Auto-refresh every 10 seconds during live auction
   usePolling(refresh, 10000, true);
 
-  const bids = auction?.bids || [];
-  const poolSize = auction?.pool_size || 0;
-  const bankroll = auction?.bankroll || 0;
-  const spent = bids
-    .filter((b) => b.buyer?.toLowerCase() === 'me')
-    .reduce((sum, b) => sum + (b.price || 0), 0);
-  const remaining = bankroll - spent;
+  const poolSize = auction?.total_pool || 0;
+  const bankroll = auction?.my_bankroll || 0;
+  const remaining = auction?.remaining_bankroll || 0;
+  const spent = bankroll - remaining;
 
   const soldIds = useMemo(
-    () => new Set(bids.map((b) => b.golfer_id)),
-    [bids]
+    () => new Set(auction?.golfers_sold || []),
+    [auction?.golfers_sold]
   );
   const unsold = useMemo(
     () => golfers.filter((g) => !soldIds.has(g.id)),
@@ -51,6 +49,7 @@ export default function AuctionPanel() {
     pctGolfersSold > 0
       ? (pctBankrollSpent / pctGolfersSold).toFixed(2)
       : '--';
+  const spendRateNum = parseFloat(spendRate);
 
   const handleQuickBid = useCallback((golfer) => {
     setPreselectedGolfer(golfer);
@@ -93,15 +92,18 @@ export default function AuctionPanel() {
         <StatCard
           label="Spend Rate"
           value={`${spendRate}x`}
-          subtitle={spendRate > 1.2 ? 'Spending fast' : spendRate < 0.8 ? 'Under-spending' : 'On pace'}
+          subtitle={!isNaN(spendRateNum) ? (spendRateNum > 1.2 ? 'Spending fast' : spendRateNum < 0.8 ? 'Under-spending' : 'On pace') : 'No data'}
           trend={
-            spendRate > 1.2 ? 'down' : spendRate < 0.8 ? 'up' : 'neutral'
+            !isNaN(spendRateNum) ? (spendRateNum > 1.2 ? 'down' : spendRateNum < 0.8 ? 'up' : 'neutral') : 'neutral'
           }
         />
       </div>
 
       {/* Alert Ticker */}
       <AlertTicker />
+
+      {/* Quick Price Check */}
+      <QuickPrice />
 
       {/* Main Content: Bid Form + History | Remaining Golfers */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -157,14 +159,13 @@ export default function AuctionPanel() {
             <span className="flex-1">Golfer</span>
             <span className="w-14 text-right">Win%</span>
             <span className="w-12 text-right">EV</span>
-            <span className="w-16 text-center">Alert</span>
             <span className="w-6" />
           </div>
 
           {/* Rows */}
           <div className="max-h-[500px] overflow-y-auto space-y-0.5">
             {unsold
-              .sort((a, b) => (b.ev || 0) - (a.ev || 0))
+              .sort((a, b) => (b.ev_score || 0) - (a.ev_score || 0))
               .map((g) => (
                 <div
                   key={g.id}
@@ -172,22 +173,19 @@ export default function AuctionPanel() {
                   className="flex items-center gap-2 px-3 py-1.5 hover:bg-augusta/10 rounded cursor-pointer transition-colors group text-xs"
                 >
                   <span className="w-8 text-right text-gray-500 font-mono">
-                    {g.rank || '--'}
+                    {g.world_ranking || '--'}
                   </span>
                   <span className="flex-1 font-medium text-gray-200 group-hover:text-white truncate">
                     {g.name}
                   </span>
                   <span className="w-14 text-right text-gray-400 font-mono">
-                    {formatPct(g.model_win_pct)}
+                    {formatPct(g.model_win_prob)}
                   </span>
                   <span
-                    className={`w-12 text-right font-mono font-bold ${evColor(g.ev)}`}
+                    className={`w-12 text-right font-mono font-bold ${evColor(g.ev_score)}`}
                   >
-                    {g.ev != null ? g.ev.toFixed(1) : '--'}
+                    {g.ev_score != null ? g.ev_score.toFixed(1) : '--'}
                   </span>
-                  <div className="w-16 flex justify-center">
-                    {g.alert_level && <AlertBadge level={g.alert_level} />}
-                  </div>
                   <span className="w-6 text-center opacity-0 group-hover:opacity-100 text-gold transition-opacity">
                     +
                   </span>

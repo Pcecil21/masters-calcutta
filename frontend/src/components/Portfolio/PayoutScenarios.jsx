@@ -20,115 +20,126 @@ export default function PayoutScenarios({ scenarios }) {
     );
   }
 
+  // API returns: total_pool, payout_structure, golfer_projections,
+  // total_invested, total_expected_payout, expected_profit, expected_roi_pct, win_probability_any
   const {
-    p_double = 0,
-    p_breakeven = 0,
-    p_loss = 0,
+    total_pool = 0,
+    total_invested = 0,
+    total_expected_payout = 0,
     expected_profit = 0,
-    upside = 0,
-    downside = 0,
-    distribution = [],
+    expected_roi_pct = 0,
+    win_probability_any = 0,
+    golfer_projections = [],
   } = scenarios;
-
-  const probBars = [
-    { label: 'P(2x Return)', value: p_double, color: '#006747' },
-    { label: 'P(Breakeven)', value: p_breakeven, color: '#FDD835' },
-    { label: 'P(Loss)', value: p_loss, color: '#ef4444' },
-  ];
 
   return (
     <div className="space-y-4">
-      {/* Probability Cards */}
-      <div className="grid grid-cols-3 gap-3">
-        {probBars.map((p, i) => (
-          <div
-            key={i}
-            className="bg-gray-900/60 rounded-lg px-3 py-3 text-center"
-          >
-            <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
-              {p.label}
-            </div>
-            <div
-              className="text-xl font-bold"
-              style={{ color: p.color }}
-            >
-              {formatPct(p.value)}
-            </div>
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="bg-gray-900/60 rounded-lg px-3 py-3 text-center">
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
+            Total Pool
           </div>
-        ))}
-      </div>
-
-      {/* Summary Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-gray-900/60 rounded-lg px-3 py-2 text-center">
-          <div className="text-[10px] uppercase text-gray-500">
+          <div className="text-lg font-bold text-gold">
+            {formatCurrency(total_pool)}
+          </div>
+        </div>
+        <div className="bg-gray-900/60 rounded-lg px-3 py-3 text-center">
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
+            Expected Payout
+          </div>
+          <div className="text-lg font-bold text-green-400">
+            {formatCurrency(total_expected_payout)}
+          </div>
+        </div>
+        <div className="bg-gray-900/60 rounded-lg px-3 py-3 text-center">
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
             Expected Profit
           </div>
           <div
-            className={`text-sm font-bold ${expected_profit >= 0 ? 'text-green-400' : 'text-red-400'}`}
+            className={`text-lg font-bold ${expected_profit >= 0 ? 'text-green-400' : 'text-red-400'}`}
           >
             {formatCurrency(expected_profit)}
           </div>
         </div>
-        <div className="bg-gray-900/60 rounded-lg px-3 py-2 text-center">
-          <div className="text-[10px] uppercase text-gray-500">Upside</div>
-          <div className="text-sm font-bold text-green-400">
-            {formatCurrency(upside)}
+        <div className="bg-gray-900/60 rounded-lg px-3 py-3 text-center">
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
+            P(Any Win)
           </div>
-        </div>
-        <div className="bg-gray-900/60 rounded-lg px-3 py-2 text-center">
-          <div className="text-[10px] uppercase text-gray-500">Downside</div>
-          <div className="text-sm font-bold text-red-400">
-            {formatCurrency(downside)}
+          <div className="text-lg font-bold text-gold">
+            {formatPct(win_probability_any)}
           </div>
         </div>
       </div>
 
-      {/* Distribution Histogram */}
-      {distribution.length > 0 && (
-        <div className="h-48">
-          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">
-            Outcome Distribution
+      {/* ROI Summary */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="bg-gray-900/60 rounded-lg px-3 py-2 text-center">
+          <div className="text-[10px] uppercase text-gray-500">
+            Total Invested
           </div>
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={distribution}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis
-                dataKey="range"
-                tick={{ fontSize: 9, fill: '#6b7280' }}
-                angle={-30}
-                textAnchor="end"
-                height={40}
-              />
-              <YAxis
-                tick={{ fontSize: 9, fill: '#6b7280' }}
-                tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: '#1f2937',
-                  border: '1px solid #374151',
-                  borderRadius: '8px',
-                  fontSize: '11px',
-                }}
-                formatter={(val) => [`${(val * 100).toFixed(1)}%`, 'Probability']}
-              />
-              <ReferenceLine x="Breakeven" stroke="#FDD835" strokeDasharray="5 5" />
-              <Bar dataKey="probability" radius={[2, 2, 0, 0]}>
-                {distribution.map((entry, i) => (
-                  <Cell
-                    key={i}
-                    fill={
-                      entry.profit >= 0
-                        ? '#006747'
-                        : '#ef4444'
-                    }
-                    fillOpacity={0.8}
-                  />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          <div className="text-sm font-bold text-gray-300">
+            {formatCurrency(total_invested)}
+          </div>
+        </div>
+        <div className="bg-gray-900/60 rounded-lg px-3 py-2 text-center">
+          <div className="text-[10px] uppercase text-gray-500">
+            Expected ROI
+          </div>
+          <div
+            className={`text-sm font-bold ${expected_roi_pct >= 0 ? 'text-green-400' : 'text-red-400'}`}
+          >
+            {formatPct(expected_roi_pct / 100)}
+          </div>
+        </div>
+      </div>
+
+      {/* Golfer Projections */}
+      {golfer_projections.length > 0 && (
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">
+            Golfer Projections
+          </div>
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={golfer_projections.slice(0, 10)}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 9, fill: '#6b7280' }}
+                  angle={-30}
+                  textAnchor="end"
+                  height={40}
+                />
+                <YAxis
+                  tick={{ fontSize: 9, fill: '#6b7280' }}
+                  tickFormatter={(v) => `$${v}`}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#1f2937',
+                    border: '1px solid #374151',
+                    borderRadius: '8px',
+                    fontSize: '11px',
+                  }}
+                  formatter={(val) => [formatCurrency(val), 'Expected Payout']}
+                />
+                <Bar dataKey="expected_payout" radius={[2, 2, 0, 0]}>
+                  {golfer_projections.slice(0, 10).map((entry, i) => (
+                    <Cell
+                      key={i}
+                      fill={
+                        (entry.expected_payout || 0) >= (entry.purchase_price || 0)
+                          ? '#006747'
+                          : '#ef4444'
+                      }
+                      fillOpacity={0.8}
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
         </div>
       )}
     </div>

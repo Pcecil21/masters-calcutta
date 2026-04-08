@@ -55,14 +55,20 @@ class AuctionConfig(BaseModel):
 
     total_pool: float = Field(gt=0, description="Total auction pool size in dollars")
     my_bankroll: float = Field(gt=0, description="My available bankroll")
+    num_bidders: int = Field(default=12, ge=1)
+    estimated_pool: float = Field(default=0.0, ge=0, description="Optional initial pool estimate before bids flow")
     payout_structure: dict = Field(
         default_factory=lambda: {
             "1st": 0.50,
             "2nd": 0.20,
-            "3rd": 0.10,
-            "top5": 0.05,
-            "top10": 0.03,
-            "made_cut": 0.01,
+            "3rd": 0.12,
+            "4th": 0.05,
+            "5th": 0.05,
+            "6th": 0.016,
+            "7th": 0.016,
+            "8th": 0.016,
+            "9th": 0.016,
+            "10th": 0.016,
         },
         description="Payout percentages keyed by finish position/tier",
     )
@@ -134,6 +140,37 @@ class StrategyRecommendation(BaseModel):
     alert_level: str = Field(
         description="must_bid | good_value | fair | overpriced | avoid"
     )
+
+
+class PriceCheckRequest(BaseModel):
+    """Real-time price check during live auction."""
+
+    golfer_id: str
+    current_price: float = Field(gt=0)
+
+
+class PriceCheckResponse(BaseModel):
+    """Result of a live price check."""
+
+    golfer_id: str
+    golfer_name: str
+    current_price: float
+    expected_payout: float
+    ev: float
+    ev_multiple: float
+    max_bid: float
+    verdict: str = Field(description="BID | PASS | MARGINAL")
+    message: str
+
+
+class QuickSheetEntry(BaseModel):
+    """Single row in the auction cheat sheet."""
+
+    golfer_id: str
+    name: str
+    max_bid: float
+    breakeven_price: float
+    alert_level: str
 
 
 class Alert(BaseModel):

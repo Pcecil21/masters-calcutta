@@ -7,13 +7,14 @@ Start with:
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.data.loaders import load_seed_data
-from app.routers import auction, backtest, golfers, portfolio, strategy
+from app.data.loaders import get_store, load_seed_data
+from app.routers import auction, backtest, golfers, odds, portfolio, strategy
 
 
 @asynccontextmanager
@@ -56,9 +57,21 @@ app.include_router(auction.router, prefix="/api")
 app.include_router(strategy.router, prefix="/api")
 app.include_router(portfolio.router, prefix="/api")
 app.include_router(backtest.router, prefix="/api")
+app.include_router(odds.router, prefix="/api")
 
 
 @app.get("/api/health")
 async def health_check() -> dict:
     """Basic health check endpoint."""
     return {"status": "ok", "service": "masters-calcutta-api"}
+
+
+@app.post("/api/recalculate")
+async def recalculate() -> dict:
+    """Clear MC cache and reload seed data."""
+    cache_file = Path(__file__).resolve().parent.parent / "data" / "seed" / "mc_cache.json"
+    if cache_file.exists():
+        cache_file.unlink()
+    load_seed_data()
+    store = get_store()
+    return {"status": "recalculated", "golfer_count": len(store["golfers"])}
