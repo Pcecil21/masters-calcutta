@@ -33,3 +33,9 @@ data/seed/mc_cache.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Runtime state
+backend/data/auction_state.json
+
+# Tooling noise
+.claude/
